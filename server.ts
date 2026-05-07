@@ -70,14 +70,16 @@ const initializeFirebaseAdmin = () => {
       }
       
       console.log("[Firebase Admin] Attempting to initialize for project:", serviceAccount.project_id);
+      console.log("[Firebase Admin] Value starts with:", trimmedValue.substring(0, 10) + "...");
 
       initializeApp({
         credential: cert(serviceAccount)
       });
       console.log("[Firebase Admin] Initialization success for project:", serviceAccount.project_id);
     } catch (e: any) {
-      console.error("[Firebase Admin] Initialization failed:", e.message);
-      (global as any).firebaseInitError = `Falha ao processar a chave JSON: ${e.message}`;
+      const errorMsg = `Falha ao processar a chave JSON: ${e.message}. Verifique se você colou o JSON completo do Firebase (começando com {) e não uma chave da Stripe.`;
+      console.error("[Firebase Admin] Initialization failed:", errorMsg);
+      (global as any).firebaseInitError = errorMsg;
     }
   } else {
     console.warn("[Firebase Admin] FIREBASE_SERVICE_ACCOUNT not found in environment.");

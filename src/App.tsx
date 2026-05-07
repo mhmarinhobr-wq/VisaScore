@@ -752,6 +752,9 @@ function LoginView({ onLogin }: { onLogin: () => void }) {
 
       if (!response.ok) {
         let msg = data.error || `Erro ao verificar acesso (Status: ${response.status}).`;
+        if (data.message) {
+          msg = `${msg} Mensagem: ${data.message}`;
+        }
         if (data.details) {
           msg = `${msg} Detalhes: ${data.details}`;
         }

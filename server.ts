@@ -116,7 +116,42 @@ async function createServer() {
 
   // Health check - check this first
   app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", adminLoaded: getApps().length > 0 });
+    res.json({ 
+      status: "ok", 
+      adminLoaded: getApps().length > 0,
+      env: {
+        hasServiceAccount: !!process.env.FIREBASE_SERVICE_ACCOUNT,
+        databaseId: databaseId || "(default)",
+        nodeEnv: process.env.NODE_ENV
+      }
+    });
+  });
+
+  // Diagnostic Endpoint
+  app.get("/api/debug-firebase", async (req, res) => {
+    try {
+      if (getApps().length === 0) initializeFirebaseAdmin();
+      const apps = getApps().map(a => ({ name: a.name, projectId: (a.options as any).credential?.projectId || "unknown" }));
+      
+      let dbStatus = "Not tested";
+      try {
+        const db = getFirestore(databaseId);
+        const test = await db.collection("whitelists").limit(1).get();
+        dbStatus = `Connected. Found ${test.size} docs in whitelists.`;
+      } catch (e: any) {
+        dbStatus = `Error: ${e.message}`;
+      }
+
+      res.json({
+        initialized: getApps().length > 0,
+        initError: (global as any).firebaseInitError || "none",
+        apps,
+        databaseId: databaseId || "(default)",
+        dbStatus
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // Hotmart Webhook Endpoint
@@ -239,34 +274,46 @@ async function createServer() {
       }
 
       // Try with specified databaseId, fallback to (default) if it fails
-      let db = getFirestore(databaseId);
-      console.log(`[Verify Whitelist] Attempting access with databaseId: ${databaseId || "(default)"}`);
+      let db;
+      try {
+        db = getFirestore(databaseId);
+        console.log(`[Verify Whitelist] Initializing session with databaseId: ${databaseId || "(default)"}`);
+      } catch (e: any) {
+        console.warn("[Firebase Admin] Could not initialize Firestore with provided ID, falling back to default.", e.message);
+        db = getFirestore();
+      }
+
+      console.log(`[Verify Whitelist] Attempting query...`);
 
       let whitelistDoc;
       try {
         whitelistDoc = await db.collection("whitelists").doc(normalizedEmail).get();
       } catch (dbErr: any) {
-        console.warn(`[Verify Whitelist] Failed to access database "${databaseId || "(default)"}":`, dbErr.message);
+        console.warn(`[Verify Whitelist] Primary access failed:`, dbErr.message);
         
-        if (databaseId && databaseId !== "(default)") {
-          console.log("[Verify Whitelist] Retrying with default database...");
+        // If we were using a specific databaseId and it failed, try the (default) one as hard fallback
+        if (databaseId) {
+          console.log("[Verify Whitelist] Hard fallback Attempt: Using default database...");
           try {
-            db = getFirestore(); // Default
-            whitelistDoc = await db.collection("whitelists").doc(normalizedEmail).get();
-            console.log("[Verify Whitelist] Success with default database.");
+            const defaultDb = getFirestore();
+            whitelistDoc = await defaultDb.collection("whitelists").doc(normalizedEmail).get();
+            db = defaultDb;
+            console.log("[Verify Whitelist] Success with default database!");
           } catch (retryErr: any) {
-            console.error("[Verify Whitelist] Final database failure:", retryErr.message);
+            console.error("[Verify Whitelist] All database attempts failed.");
             return res.status(500).json({ 
-              error: "Erro de conexão com o banco de dados Firestore.",
-              details: `Falha no banco "${databaseId}" e no padrão. Erro: ${retryErr.message}`,
-              debug: { databaseId, adminInitialized: true }
+              error: "Não foi possível acessar o Firestore.",
+              details: `Erro no banco "${databaseId}": ${dbErr.message}. Erro no banco padrão: ${retryErr.message}`,
+              help: "Certifique-se de que o Cloud Firestore foi ATIVADO no console do Firebase e que o banco de dados existe.",
+              debug: { databaseId, projectId: getApps()[0]?.options.credential ? "Loaded" : "Missing" }
             });
           }
         } else {
           return res.status(500).json({ 
-            error: "Erro de conexão com o banco de dados Firestore.",
+            error: "Erro de conexão com Firestore.",
             details: dbErr.message,
-            debug: { databaseId: databaseId || "(default)", adminInitialized: true }
+            help: "O banco de dados (default) existe e está ativo no seu console Firebase?",
+            debug: { databaseId: "(default)" }
           });
         }
       }
@@ -328,14 +375,19 @@ async function createServer() {
         return res.status(500).json({ error: "Firebase Admin não inicializado. Verifique a variável FIREBASE_SERVICE_ACCOUNT no menu de Secrets." });
       }
 
-      let db = getFirestore(databaseId);
+      let db;
+      try {
+        db = getFirestore(databaseId);
+      } catch (e) {
+        db = getFirestore();
+      }
       
       let whitelistDoc;
       try {
         whitelistDoc = await db.collection("whitelists").doc(normalizedEmail).get();
       } catch (dbErr: any) {
         console.warn(`[Login] Failed to access database "${databaseId || "(default)"}":`, dbErr.message);
-        if (databaseId && databaseId !== "(default)") {
+        if (databaseId) {
           try {
             db = getFirestore();
             whitelistDoc = await db.collection("whitelists").doc(normalizedEmail).get();
@@ -438,6 +490,16 @@ async function createServer() {
     // so we don't need to serve them here. The Express app only handles /api.
     console.log("Vercel environment detected: Express will only handle API routes.");
   }
+
+  // Global Error Handler
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error("[Global Error Handler]", err);
+    res.status(500).json({
+      error: "Ocorreu um erro inesperado no servidor.",
+      message: err.message,
+      stack: process.env.NODE_ENV === "development" ? err.stack : undefined
+    });
+  });
 
   return app;
 }

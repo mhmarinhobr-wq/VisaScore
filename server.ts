@@ -44,52 +44,63 @@ if (!databaseId && firebaseConfig) {
 }
 
 const initializeFirebaseAdmin = () => {
+  console.log("[Firebase Admin] Starting initialization sequence...");
   if (getApps().length > 0) {
+    console.log("[Firebase Admin] Already initialized. Skipping.");
     return;
   }
 
   const serviceAccountVar = process.env.FIREBASE_SERVICE_ACCOUNT;
+  console.log("[Firebase Admin] FIREBASE_SERVICE_ACCOUNT present:", !!serviceAccountVar);
   
   const currentConfig = getFirebaseConfig();
   if (!databaseId && currentConfig) {
     databaseId = (currentConfig as any).firestoreDatabaseId;
+    console.log("[Firebase Admin] databaseId taken from config:", databaseId);
   }
 
   if (serviceAccountVar) {
     try {
       const trimmedValue = serviceAccountVar.trim();
+      console.log("[Firebase Admin] Raw signal length:", trimmedValue.length);
+      console.log("[Firebase Admin] Starts with {:", trimmedValue.startsWith("{"));
       
       // Safety check: Is this a potential leak of another key? (Common mistake)
       if (trimmedValue.startsWith("sk_live_") || trimmedValue.startsWith("pk_live_")) {
-        throw new Error("A variável FIREBASE_SERVICE_ACCOUNT parece conter uma chave da Stripe (sk_live...) em vez do JSON do Firebase. Por favor, gere uma nova Chave Privada no console do Firebase e cole o JSON completo.");
+        throw new Error("A variável FIREBASE_SERVICE_ACCOUNT parece conter uma chave da Stripe (sk_live...) em vez do JSON do Firebase.");
       }
 
-      let serviceAccount = JSON.parse(
-        trimmedValue.startsWith("{") 
-          ? trimmedValue 
-          : Buffer.from(trimmedValue, 'base64').toString()
-      );
+      let serviceAccount;
+      try {
+        serviceAccount = JSON.parse(
+          trimmedValue.startsWith("{") 
+            ? trimmedValue 
+            : Buffer.from(trimmedValue, 'base64').toString()
+        );
+        console.log("[Firebase Admin] JSON parsed successfully. Project ID:", serviceAccount?.project_id);
+      } catch (jsonErr: any) {
+        console.error("[Firebase Admin] JSON Parse Error. First 20 chars:", trimmedValue.substring(0, 20));
+        throw new Error(`Erro ao interpretar JSON da Service Account: ${jsonErr.message}`);
+      }
 
       // Fix common copy-paste error where newlines in private_key are double escaped
       if (serviceAccount.private_key && typeof serviceAccount.private_key === 'string') {
         serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+        console.log("[Firebase Admin] Private key line endings normalized.");
       }
       
-      console.log("[Firebase Admin] Attempting to initialize for project:", serviceAccount.project_id);
-      console.log("[Firebase Admin] Value starts with:", trimmedValue.substring(0, 10) + "...");
-
       initializeApp({
         credential: cert(serviceAccount)
       });
       console.log("[Firebase Admin] Initialization success for project:", serviceAccount.project_id);
     } catch (e: any) {
-      const errorMsg = `Falha ao processar a chave JSON: ${e.message}. Verifique se você colou o JSON completo do Firebase (começando com {) e não uma chave da Stripe.`;
-      console.error("[Firebase Admin] Initialization failed:", errorMsg);
+      const errorMsg = `Falha na inicialização: ${e.message}. Verifique se o JSON da Service Account está completo e correto.`;
+      console.error("[Firebase Admin] CRITICAL ERROR:", errorMsg);
       (global as any).firebaseInitError = errorMsg;
     }
   } else {
-    console.warn("[Firebase Admin] FIREBASE_SERVICE_ACCOUNT not found in environment.");
-    (global as any).firebaseInitError = "Variável FIREBASE_SERVICE_ACCOUNT não definida no ambiente.";
+    console.warn("[Firebase Admin] FIREBASE_SERVICE_ACCOUNT is missing.");
+    (global as any).firebaseInitError = "Variável FIREBASE_SERVICE_ACCOUNT não definida.";
   }
 };
 

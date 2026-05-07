@@ -1,0 +1,41 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "System user with status control.",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "blocked"] },
+        "lastAccess": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "status", "createdAt"]
+    },
+    "AppContent": {
+      "title": "AppContent",
+      "description": "External links managed by admin.",
+      "type": "object",
+      "properties": {
+        "ds160": { "type": "string" },
+        "checklist": { "type": "string" },
+        "preparation": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Profiles and status."
+    },
+    "/settings/content": {
+      "schema": "AppContent",
+      "description": "Managed links."
+    },
+    "/admins/{uid}": {
+      "schema": { "type": "object", "properties": { "email": { "type": "string" } } },
+      "description": "Admin authorization list."
+    }
+  }
+}

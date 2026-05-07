@@ -1,0 +1,39 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Outfit', sans-serif;
+
+  --color-brand-blue: #002868;
+  --color-brand-red: #BF0A30;
+  --color-brand-white: #FFFFFF;
+  --color-brand-gray-light: #F8FAFC;
+  --color-brand-gray: #E2E8F0;
+}
+
+@layer base {
+  body {
+    @apply bg-brand-gray-light text-slate-900 antialiased font-sans;
+  }
+  
+  h1, h2, h3, h4 {
+    @apply font-display;
+  }
+}
+
+.glass-card {
+  @apply bg-white/80 backdrop-blur-md border border-slate-200/50 shadow-sm rounded-2xl;
+}
+
+.btn-primary {
+  @apply bg-brand-blue text-white px-6 py-3 rounded-xl font-semibold transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-brand-blue/20 flex items-center justify-center gap-2 cursor-pointer;
+}
+
+.btn-secondary {
+  @apply bg-white text-brand-blue border border-brand-blue/20 px-6 py-3 rounded-xl font-semibold transition-all hover:bg-brand-gray-light active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer;
+}
+
+.btn-outline {
+  @apply bg-transparent text-slate-600 border border-slate-200 px-6 py-3 rounded-xl font-semibold transition-all hover:bg-slate-50 flex items-center justify-center gap-2 cursor-pointer;
+}

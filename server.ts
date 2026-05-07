@@ -12,29 +12,40 @@ const __dirname = path.dirname(__filename);
 // Initialize Firebase Admin
 let databaseId: string | undefined = process.env.VITE_FIREBASE_DATABASE_ID || process.env.FIREBASE_DATABASE_ID;
 
+// Pre-read config for databaseId if possible
+try {
+  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+  if (fs.existsSync(configPath)) {
+    const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    if (!databaseId) {
+      databaseId = config.firestoreDatabaseId;
+    }
+  }
+} catch (e) {
+  // Ignore pre-read errors
+}
+
 const initializeFirebaseAdmin = () => {
-  if (getApps().length > 0) return;
+  if (getApps().length > 0) {
+    return;
+  }
 
   const serviceAccountVar = process.env.FIREBASE_SERVICE_ACCOUNT;
   
-  console.log("[Firebase Admin] Checking databaseId...");
-  // Try to find databaseId from config if not in env
   if (!databaseId) {
     try {
       const configPath = path.join(process.cwd(), "firebase-applet-config.json");
       if (fs.existsSync(configPath)) {
         const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
         databaseId = config.firestoreDatabaseId;
-        console.log("[Firebase Admin] databaseId found in config:", databaseId);
       }
     } catch (e) {
-      console.warn("[Firebase Admin] Could not read firebase-applet-config.json for databaseId");
+      console.warn("[Firebase Admin] Could not read config for databaseId");
     }
   }
 
   if (serviceAccountVar) {
     try {
-      console.log("[Firebase Admin] Found FIREBASE_SERVICE_ACCOUNT. Parsing...");
       const trimmedValue = serviceAccountVar.trim();
       const serviceAccount = JSON.parse(
         trimmedValue.startsWith("{") 
@@ -45,13 +56,13 @@ const initializeFirebaseAdmin = () => {
       initializeApp({
         credential: cert(serviceAccount)
       });
-      console.log("[Firebase Admin] Initialized with project:", serviceAccount.project_id);
+      console.log("[Firebase Admin] Initialized for project:", serviceAccount.project_id);
     } catch (e: any) {
       console.error("[Firebase Admin] Initialization failed:", e.message);
-      throw e;
+      // We don't throw here to allow the server to start, but routes will fail later
     }
   } else {
-    console.warn("[Firebase Admin] FIREBASE_SERVICE_ACCOUNT was not found in environment variables.");
+    console.warn("[Firebase Admin] FIREBASE_SERVICE_ACCOUNT not found in environment.");
   }
 };
 
@@ -204,7 +215,7 @@ async function createServer() {
 
       if (getApps().length === 0) {
         return res.status(500).json({ 
-          error: "O servidor não pôde inicializar o Firebase Admin. Certifique-se de que a variável FIREBASE_SERVICE_ACCOUNT foi configurada corretamente nas variáveis de ambiente do seu servidor (Vercel ou AI Studio).",
+          error: "O servidor não pôde inicializar o Firebase Admin. Verifique se a variável FIREBASE_SERVICE_ACCOUNT (JSON ou Base64) foi adicionada corretamente às variáveis de ambiente no dashboard da Vercel.",
           debug: { hasEnv: !!process.env.FIREBASE_SERVICE_ACCOUNT, isVercel: process.env.VERCEL === '1' }
         });
       }
@@ -216,8 +227,9 @@ async function createServer() {
       } catch (dbErr: any) {
         console.error("[Verify Whitelist] Database error:", dbErr.message);
         return res.status(500).json({ 
-          error: "Erro de conexão com o banco de dados. Verifique a chave de serviço e o ID do projeto.",
-          details: dbErr.message 
+          error: "Erro de conexão com o banco de dados Firestore. Isso geralmente acontece quando o Database ID ou o Project ID na service account estão incorretos para o ambiente Vercel.",
+          details: dbErr.message,
+          databaseId: databaseId || "(default)"
         });
       }
       const isCreator = normalizedEmail === 'mhmarinhobr@gmail.com';
@@ -256,7 +268,10 @@ async function createServer() {
       });
     } catch (error: any) {
       console.error("Error in verify-whitelist:", error);
-      res.status(500).json({ error: `Erro ao verificar acesso: ${error.message}` });
+      res.status(500).json({ 
+        error: `Erro interno no servidor ao verificar acesso: ${error.message}`,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      });
     }
   });
 

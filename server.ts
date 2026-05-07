@@ -20,15 +20,9 @@ if (databaseId === "(default)") {
 // Helper to read config safely
 const getFirebaseConfig = () => {
   try {
-    // __dirname is the root directory where server.ts and the config file live
-    const configPath = path.join(__dirname, "firebase-applet-config.json");
+    const configPath = path.join(process.cwd(), "firebase-applet-config.json");
     if (fs.existsSync(configPath)) {
       return JSON.parse(fs.readFileSync(configPath, "utf8"));
-    }
-    // Fallback to process.cwd() if __dirname fails
-    const fallbackPath = path.join(process.cwd(), "firebase-applet-config.json");
-    if (fs.existsSync(fallbackPath)) {
-      return JSON.parse(fs.readFileSync(fallbackPath, "utf8"));
     }
   } catch (e) {
     console.warn("[Firebase Admin] Could not read config file:", e);
@@ -39,66 +33,47 @@ const getFirebaseConfig = () => {
 const firebaseConfig = getFirebaseConfig();
 
 // Use config for databaseId if not in env
-if (!databaseId && firebaseConfig) {
-  databaseId = (firebaseConfig as any).firestoreDatabaseId;
+if (!databaseId && firebaseConfig && firebaseConfig.firestoreDatabaseId) {
+  databaseId = firebaseConfig.firestoreDatabaseId;
 }
 
 const initializeFirebaseAdmin = () => {
-  console.log("[Firebase Admin] Starting initialization sequence...");
-  if (getApps().length > 0) {
-    console.log("[Firebase Admin] Already initialized. Skipping.");
-    return;
-  }
+  if (getApps().length > 0) return;
 
-  const serviceAccountVar = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_AC;
-  console.log("[Firebase Admin] FIREBASE_SERVICE_ACCOUNT present:", !!process.env.FIREBASE_SERVICE_ACCOUNT);
-  console.log("[Firebase Admin] FIREBASE_SERVICE_AC present:", !!process.env.FIREBASE_SERVICE_AC);
-  console.log("[Firebase Admin] Final variable resolved:", !!serviceAccountVar);
+  const serviceAccountVar = process.env.FIREBASE_SERVICE_ACCOUNT;
   
-  const currentConfig = getFirebaseConfig();
-  if (!databaseId && currentConfig) {
-    databaseId = (currentConfig as any).firestoreDatabaseId;
-    console.log("[Firebase Admin] databaseId taken from config:", databaseId);
-  }
-
   if (serviceAccountVar) {
     try {
       const trimmedValue = serviceAccountVar.trim();
-      console.log("[Firebase Admin] Raw signal length:", trimmedValue.length);
-      console.log("[Firebase Admin] Starts with {:", trimmedValue.startsWith("{"));
-      
-      // Safety check: Is this a potential leak of another key? (Common mistake)
-      if (trimmedValue.startsWith("sk_live_") || trimmedValue.startsWith("pk_live_")) {
-        throw new Error("A variável FIREBASE_SERVICE_ACCOUNT parece conter uma chave da Stripe (sk_live...) em vez do JSON do Firebase.");
-      }
-
       let serviceAccount;
-      try {
-        serviceAccount = JSON.parse(
-          trimmedValue.startsWith("{") 
-            ? trimmedValue 
-            : Buffer.from(trimmedValue, 'base64').toString()
-        );
-        console.log("[Firebase Admin] JSON parsed successfully. Project ID:", serviceAccount?.project_id);
-      } catch (jsonErr: any) {
-        console.error("[Firebase Admin] JSON Parse Error. First 20 chars:", trimmedValue.substring(0, 20));
-        throw new Error(`Erro ao interpretar JSON da Service Account: ${jsonErr.message}`);
+      
+      if (trimmedValue.startsWith("{")) {
+        serviceAccount = JSON.parse(trimmedValue);
+      } else {
+        // Try base64
+        try {
+          serviceAccount = JSON.parse(Buffer.from(trimmedValue, 'base64').toString());
+        } catch {
+          throw new Error("Formato de Service Account inválido (não é JSON nem Base64).");
+        }
+      }
+      
+      if (!serviceAccount.project_id || !serviceAccount.private_key || !serviceAccount.client_email) {
+        throw new Error("JSON da Service Account incompleto (faltam campos obrigatórios).");
       }
 
-      // Fix common copy-paste error where newlines in private_key are double escaped
       if (serviceAccount.private_key && typeof serviceAccount.private_key === 'string') {
         serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
-        console.log("[Firebase Admin] Private key line endings normalized.");
       }
       
       initializeApp({
         credential: cert(serviceAccount)
       });
-      console.log("[Firebase Admin] Initialization success for project:", serviceAccount.project_id);
+      console.log("[Firebase Admin] Initialized for project:", serviceAccount.project_id);
+      console.log("[Firebase Admin] Target Database ID:", databaseId || "(default)");
     } catch (e: any) {
-      const errorMsg = `Falha na inicialização: ${e.message}. Verifique se o JSON da Service Account está completo e correto.`;
-      console.error("[Firebase Admin] CRITICAL ERROR:", errorMsg);
-      (global as any).firebaseInitError = errorMsg;
+      console.error("[Firebase Admin] Initialization error:", e.message);
+      (global as any).firebaseInitError = e.message;
     }
   } else {
     console.warn("[Firebase Admin] FIREBASE_SERVICE_ACCOUNT is missing.");
@@ -263,25 +238,39 @@ async function createServer() {
         });
       }
 
-      const db = getFirestore(databaseId);
-      
-      // Basic check to see if databaseId is set correctly
-      console.log(`[Verify Whitelist] Using databaseId: ${databaseId || "(default)"}`);
+      // Try with specified databaseId, fallback to (default) if it fails
+      let db = getFirestore(databaseId);
+      console.log(`[Verify Whitelist] Attempting access with databaseId: ${databaseId || "(default)"}`);
 
       let whitelistDoc;
       try {
         whitelistDoc = await db.collection("whitelists").doc(normalizedEmail).get();
       } catch (dbErr: any) {
-        console.error("[Verify Whitelist] Database error:", dbErr.message);
-        return res.status(500).json({ 
-          error: "Erro de conexão com o banco de dados Firestore.",
-          details: dbErr.message,
-          debug: { 
-            databaseId: databaseId || "(default)",
-            projectId: getApps()[0]?.options.credential ? "Loaded" : "Not Loaded"
+        console.warn(`[Verify Whitelist] Failed to access database "${databaseId || "(default)"}":`, dbErr.message);
+        
+        if (databaseId && databaseId !== "(default)") {
+          console.log("[Verify Whitelist] Retrying with default database...");
+          try {
+            db = getFirestore(); // Default
+            whitelistDoc = await db.collection("whitelists").doc(normalizedEmail).get();
+            console.log("[Verify Whitelist] Success with default database.");
+          } catch (retryErr: any) {
+            console.error("[Verify Whitelist] Final database failure:", retryErr.message);
+            return res.status(500).json({ 
+              error: "Erro de conexão com o banco de dados Firestore.",
+              details: `Falha no banco "${databaseId}" e no padrão. Erro: ${retryErr.message}`,
+              debug: { databaseId, adminInitialized: true }
+            });
           }
-        });
+        } else {
+          return res.status(500).json({ 
+            error: "Erro de conexão com o banco de dados Firestore.",
+            details: dbErr.message,
+            debug: { databaseId: databaseId || "(default)", adminInitialized: true }
+          });
+        }
       }
+      
       const isCreator = normalizedEmail === 'mhmarinhobr@gmail.com';
       
       let isAdminUser = false;
@@ -292,7 +281,7 @@ async function createServer() {
         // Ignore fallback
       }
 
-      if (!whitelistDoc.exists && !isCreator && !isAdminUser) {
+      if (!whitelistDoc?.exists && !isCreator && !isAdminUser) {
         return res.json({ 
           whitelisted: false, 
           error: "Email não cadastrado. Verifique o email usado na compra." 
@@ -339,19 +328,31 @@ async function createServer() {
         return res.status(500).json({ error: "Firebase Admin não inicializado. Verifique a variável FIREBASE_SERVICE_ACCOUNT no menu de Secrets." });
       }
 
-      const db = getFirestore(databaseId);
+      let db = getFirestore(databaseId);
       
       let whitelistDoc;
       try {
         whitelistDoc = await db.collection("whitelists").doc(normalizedEmail).get();
       } catch (dbErr: any) {
-        console.error("Firestore database access error:", dbErr);
-        // If it fails here, it might be databaseId mismatch or permissions
-        return res.status(500).json({ 
-          error: "Erro ao acessar banco de dados.", 
-          details: dbErr.message,
-          debug: { databaseId, adminInitialized: getApps().length > 0 }
-        });
+        console.warn(`[Login] Failed to access database "${databaseId || "(default)"}":`, dbErr.message);
+        if (databaseId && databaseId !== "(default)") {
+          try {
+            db = getFirestore();
+            whitelistDoc = await db.collection("whitelists").doc(normalizedEmail).get();
+          } catch (retryErr: any) {
+            return res.status(500).json({ 
+              error: "Erro ao acessar banco de dados.", 
+              details: `Falha no banco "${databaseId}" e no padrão. Erro: ${retryErr.message}`,
+              debug: { databaseId, adminInitialized: true }
+            });
+          }
+        } else {
+          return res.status(500).json({ 
+            error: "Erro ao acessar banco de dados.", 
+            details: dbErr.message,
+            debug: { databaseId: databaseId || "(default)", adminInitialized: true }
+          });
+        }
       }
 
       const isCreator = normalizedEmail === 'mhmarinhobr@gmail.com';

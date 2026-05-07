@@ -33,6 +33,20 @@
       "schema": "AppContent",
       "description": "Managed links."
     },
+    "/whitelists/{email}": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "email": { "type": "string" },
+          "name": { "type": "string" },
+          "source": { "type": "string" },
+          "purchasedAt": { "type": "string", "format": "date-time" },
+          "status": { "type": "string" }
+        },
+        "required": ["email", "status"]
+      },
+      "description": "Authorized emails for specific access."
+    },
     "/admins/{uid}": {
       "schema": { "type": "object", "properties": { "email": { "type": "string" } } },
       "description": "Admin authorization list."

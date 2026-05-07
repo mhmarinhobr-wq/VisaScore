@@ -34,10 +34,13 @@ export default async function handler(req: any, res: any) {
       error: "Erro crítico de inicialização no Vercel", 
       message: err.message,
       stack: err.stack,
-      env: {
+      debug: {
         hasServiceAccount: !!process.env.FIREBASE_SERVICE_ACCOUNT,
+        serviceAccountLength: (process.env.FIREBASE_SERVICE_ACCOUNT || "").length,
         nodeEnv: process.env.NODE_ENV,
-        vercel: process.env.VERCEL
+        vercel: process.env.VERCEL,
+        cwd: process.cwd(),
+        firebaseInitError: (global as any).firebaseInitError
       }
     });
   }

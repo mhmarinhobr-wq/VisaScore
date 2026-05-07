@@ -58,11 +58,16 @@ const initializeFirebaseAdmin = () => {
         throw new Error("A variável FIREBASE_SERVICE_ACCOUNT parece conter uma chave da Stripe (sk_live...) em vez do JSON do Firebase. Por favor, gere uma nova Chave Privada no console do Firebase e cole o JSON completo.");
       }
 
-      const serviceAccount = JSON.parse(
+      let serviceAccount = JSON.parse(
         trimmedValue.startsWith("{") 
           ? trimmedValue 
           : Buffer.from(trimmedValue, 'base64').toString()
       );
+
+      // Fix common copy-paste error where newlines in private_key are double escaped
+      if (serviceAccount.private_key && typeof serviceAccount.private_key === 'string') {
+        serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+      }
       
       console.log("[Firebase Admin] Attempting to initialize for project:", serviceAccount.project_id);
 
@@ -72,7 +77,7 @@ const initializeFirebaseAdmin = () => {
       console.log("[Firebase Admin] Initialization success for project:", serviceAccount.project_id);
     } catch (e: any) {
       console.error("[Firebase Admin] Initialization failed:", e.message);
-      (global as any).firebaseInitError = e.message;
+      (global as any).firebaseInitError = `Falha ao processar a chave JSON: ${e.message}`;
     }
   } else {
     console.warn("[Firebase Admin] FIREBASE_SERVICE_ACCOUNT not found in environment.");
@@ -236,15 +241,22 @@ async function createServer() {
       }
 
       const db = getFirestore(databaseId);
+      
+      // Basic check to see if databaseId is set correctly
+      console.log(`[Verify Whitelist] Using databaseId: ${databaseId || "(default)"}`);
+
       let whitelistDoc;
       try {
         whitelistDoc = await db.collection("whitelists").doc(normalizedEmail).get();
       } catch (dbErr: any) {
         console.error("[Verify Whitelist] Database error:", dbErr.message);
         return res.status(500).json({ 
-          error: "Erro de conexão com o banco de dados Firestore. Isso geralmente acontece quando o Database ID ou o Project ID na service account estão incorretos para o ambiente Vercel.",
+          error: "Erro de conexão com o banco de dados Firestore.",
           details: dbErr.message,
-          databaseId: databaseId || "(default)"
+          debug: { 
+            databaseId: databaseId || "(default)",
+            projectId: getApps()[0]?.options.credential ? "Loaded" : "Not Loaded"
+          }
         });
       }
       const isCreator = normalizedEmail === 'mhmarinhobr@gmail.com';

@@ -779,11 +779,14 @@ function LoginView({ onLogin }: { onLogin: () => void }) {
     try {
       await signInWithEmailAndPassword(auth, email, password);
     } catch (err: any) {
-      console.error(err);
-      if (err.code === 'auth/wrong-password') setError('Senha incorreta.');
+      console.error("Auth error:", err);
+      if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        setError('E-mail ou senha incorretos. Verifique suas credenciais.');
+      }
       else if (err.code === 'auth/user-disabled') setError('Esta conta foi desativada.');
       else if (err.code === 'auth/too-many-requests') setError('Muitas tentativas. Tente mais tarde.');
-      else setError('Erro ao entrar. Verifique sua senha.');
+      else if (err.code === 'auth/internal-error') setError('Erro interno do Firebase Auth. Verifique se o login com E-mail/Senha está ativado no Console do Firebase.');
+      else setError(`Erro ao entrar: ${err.message}`);
     } finally {
       setLoading(false);
     }

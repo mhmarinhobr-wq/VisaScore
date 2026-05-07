@@ -6,6 +6,9 @@ import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 import fs from "fs";
 
+// Import config statically for better bundling
+import firebaseConfig from "./firebase-applet-config.json" with { type: "json" };
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -17,22 +20,9 @@ if (databaseId === "(default)") {
   databaseId = undefined;
 }
 
-// Pre-read config for databaseId if possible
-try {
-  let configPath = path.join(process.cwd(), "firebase-applet-config.json");
-  // Enforce absolute path check for Vercel
-  if (!fs.existsSync(configPath)) {
-    configPath = path.resolve("./firebase-applet-config.json");
-  }
-  
-  if (fs.existsSync(configPath)) {
-    const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-    if (!databaseId) {
-      databaseId = config.firestoreDatabaseId;
-    }
-  }
-} catch (e) {
-  // Ignore pre-read errors
+// Use imported config for databaseId if not in env
+if (!databaseId && firebaseConfig) {
+  databaseId = (firebaseConfig as any).firestoreDatabaseId;
 }
 
 const initializeFirebaseAdmin = () => {
@@ -42,19 +32,8 @@ const initializeFirebaseAdmin = () => {
 
   const serviceAccountVar = process.env.FIREBASE_SERVICE_ACCOUNT;
   
-  if (!databaseId) {
-    try {
-      let configPath = path.join(process.cwd(), "firebase-applet-config.json");
-      if (!fs.existsSync(configPath)) {
-        configPath = path.resolve("./firebase-applet-config.json");
-      }
-      if (fs.existsSync(configPath)) {
-        const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-        databaseId = config.firestoreDatabaseId;
-      }
-    } catch (e) {
-      console.warn("[Firebase Admin] Could not read config for databaseId");
-    }
+  if (!databaseId && firebaseConfig) {
+    databaseId = (firebaseConfig as any).firestoreDatabaseId;
   }
 
   if (serviceAccountVar) {

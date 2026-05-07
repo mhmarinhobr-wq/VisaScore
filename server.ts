@@ -64,16 +64,19 @@ const initializeFirebaseAdmin = () => {
           : Buffer.from(trimmedValue, 'base64').toString()
       );
       
+      console.log("[Firebase Admin] Attempting to initialize for project:", serviceAccount.project_id);
+
       initializeApp({
         credential: cert(serviceAccount)
       });
-      console.log("[Firebase Admin] Initialized for project:", serviceAccount.project_id);
+      console.log("[Firebase Admin] Initialization success for project:", serviceAccount.project_id);
     } catch (e: any) {
       console.error("[Firebase Admin] Initialization failed:", e.message);
-      // We don't throw here to allow the server to start, but routes will fail later
+      (global as any).firebaseInitError = e.message;
     }
   } else {
     console.warn("[Firebase Admin] FIREBASE_SERVICE_ACCOUNT not found in environment.");
+    (global as any).firebaseInitError = "Variável FIREBASE_SERVICE_ACCOUNT não definida no ambiente.";
   }
 };
 
@@ -226,7 +229,8 @@ async function createServer() {
 
       if (getApps().length === 0) {
         return res.status(500).json({ 
-          error: "O servidor não pôde inicializar o Firebase Admin. Verifique se a variável FIREBASE_SERVICE_ACCOUNT (JSON ou Base64) foi adicionada corretamente às variáveis de ambiente no dashboard da Vercel.",
+          error: "O servidor não pôde inicializar o Firebase Admin.",
+          details: (global as any).firebaseInitError || "Verifique se o JSON da Service Account está correto.",
           debug: { hasEnv: !!process.env.FIREBASE_SERVICE_ACCOUNT, isVercel: process.env.VERCEL === '1' }
         });
       }

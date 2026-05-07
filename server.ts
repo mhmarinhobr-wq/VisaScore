@@ -50,8 +50,10 @@ const initializeFirebaseAdmin = () => {
     return;
   }
 
-  const serviceAccountVar = process.env.FIREBASE_SERVICE_ACCOUNT;
-  console.log("[Firebase Admin] FIREBASE_SERVICE_ACCOUNT present:", !!serviceAccountVar);
+  const serviceAccountVar = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_AC;
+  console.log("[Firebase Admin] FIREBASE_SERVICE_ACCOUNT present:", !!process.env.FIREBASE_SERVICE_ACCOUNT);
+  console.log("[Firebase Admin] FIREBASE_SERVICE_AC present:", !!process.env.FIREBASE_SERVICE_AC);
+  console.log("[Firebase Admin] Final variable resolved:", !!serviceAccountVar);
   
   const currentConfig = getFirebaseConfig();
   if (!databaseId && currentConfig) {

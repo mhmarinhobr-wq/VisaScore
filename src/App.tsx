@@ -749,8 +749,14 @@ function LoginView({ onLogin }: { onLogin: () => void }) {
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Erro ao verificar acesso. Tente novamente.`);
+        let errorMsg = `Erro ao verificar acesso (Status: ${response.status}). Tente novamente.`;
+        try {
+          const errorData = await response.json();
+          errorMsg = errorData.error || errorMsg;
+        } catch (e) {
+          console.error("Failed to parse error response as JSON:", e);
+        }
+        throw new Error(errorMsg);
       }
 
       const data = await response.json();

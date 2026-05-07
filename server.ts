@@ -10,52 +10,48 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Initialize Firebase Admin
-let databaseId: string | undefined = process.env.VITE_FIREBASE_DATABASE_ID;
+let databaseId: string | undefined = process.env.VITE_FIREBASE_DATABASE_ID || process.env.FIREBASE_DATABASE_ID;
 
 const initializeFirebaseAdmin = () => {
   if (getApps().length > 0) return;
 
   const serviceAccountVar = process.env.FIREBASE_SERVICE_ACCOUNT;
   
+  console.log("[Firebase Admin] Checking databaseId...");
   // Try to find databaseId from config if not in env
   if (!databaseId) {
     try {
-      // Try multiple paths for config
-      const paths = [
-        path.join(process.cwd(), "firebase-applet-config.json"),
-        path.join(__dirname, "firebase-applet-config.json")
-      ];
-      
-      for (const p of paths) {
-        if (fs.existsSync(p)) {
-          const config = JSON.parse(fs.readFileSync(p, "utf8"));
-          databaseId = config.firestoreDatabaseId;
-          break;
-        }
+      const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+      if (fs.existsSync(configPath)) {
+        const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+        databaseId = config.firestoreDatabaseId;
+        console.log("[Firebase Admin] databaseId found in config:", databaseId);
       }
     } catch (e) {
-      console.warn("Could not read firebase-applet-config.json for databaseId");
+      console.warn("[Firebase Admin] Could not read firebase-applet-config.json for databaseId");
     }
   }
 
   if (serviceAccountVar) {
     try {
+      console.log("[Firebase Admin] Found FIREBASE_SERVICE_ACCOUNT. Parsing...");
+      const trimmedValue = serviceAccountVar.trim();
       const serviceAccount = JSON.parse(
-        serviceAccountVar.trim().startsWith("{") 
-          ? serviceAccountVar 
-          : Buffer.from(serviceAccountVar, 'base64').toString()
+        trimmedValue.startsWith("{") 
+          ? trimmedValue 
+          : Buffer.from(trimmedValue, 'base64').toString()
       );
       
       initializeApp({
         credential: cert(serviceAccount)
       });
-      console.log("Firebase Admin Initialized with project:", serviceAccount.project_id);
-      console.log("Using Database ID:", databaseId || "(default)");
-    } catch (e) {
-      console.error("Failed to parse or initialize Firebase Admin with service account:", e);
+      console.log("[Firebase Admin] Initialized with project:", serviceAccount.project_id);
+    } catch (e: any) {
+      console.error("[Firebase Admin] Initialization failed:", e.message);
+      throw e;
     }
   } else {
-    console.warn("FIREBASE_SERVICE_ACCOUNT not found.");
+    console.warn("[Firebase Admin] FIREBASE_SERVICE_ACCOUNT was not found in environment variables.");
   }
 };
 
@@ -196,8 +192,10 @@ async function createServer() {
   // Verify if an email is whitelisted
   app.post("/api/verify-whitelist", async (req, res) => {
     const { email } = req.body;
-    if (!email) return res.status(400).json({ error: "Email is required" });
+    if (!email) return res.status(400).json({ error: "O e-mail é obrigatório." });
     const normalizedEmail = email.toLowerCase().trim();
+
+    console.log(`[Verify Whitelist] Checking access for: ${normalizedEmail}`);
 
     try {
       if (getApps().length === 0) {
@@ -206,8 +204,8 @@ async function createServer() {
 
       if (getApps().length === 0) {
         return res.status(500).json({ 
-          error: "O servidor não pôde inicializar o Firebase Admin. Certifique-se de que a variável FIREBASE_SERVICE_ACCOUNT foi adicionada corretamente no menu de Secrets do AI Studio.",
-          debug: { hasEnv: !!process.env.FIREBASE_SERVICE_ACCOUNT }
+          error: "O servidor não pôde inicializar o Firebase Admin. Certifique-se de que a variável FIREBASE_SERVICE_ACCOUNT foi configurada corretamente nas variáveis de ambiente do seu servidor (Vercel ou AI Studio).",
+          debug: { hasEnv: !!process.env.FIREBASE_SERVICE_ACCOUNT, isVercel: process.env.VERCEL === '1' }
         });
       }
 
@@ -216,9 +214,9 @@ async function createServer() {
       try {
         whitelistDoc = await db.collection("whitelists").doc(normalizedEmail).get();
       } catch (dbErr: any) {
-        console.error("Database access error:", dbErr);
+        console.error("[Verify Whitelist] Database error:", dbErr.message);
         return res.status(500).json({ 
-          error: "Erro ao acessar o banco de dados. Verifique a chave de serviço e o ID do banco.",
+          error: "Erro de conexão com o banco de dados. Verifique a chave de serviço e o ID do projeto.",
           details: dbErr.message 
         });
       }

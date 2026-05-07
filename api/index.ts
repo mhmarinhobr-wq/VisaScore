@@ -3,20 +3,22 @@ import createServer from '../server.ts';
 let cachedApp;
 
 export default async function handler(req, res) {
-  console.log(`Vercel Handler: ${req.method} ${req.url}`);
   try {
     if (!cachedApp) {
-      console.log("Initializing server for first time in this worker...");
       cachedApp = await createServer();
-      console.log("Server initialized successfully");
     }
+    
+    // Express apps are actually functions (req, res, next) => void
     return cachedApp(req, res);
   } catch (err: any) {
-    console.error("CRITICAL Vercel handler crash:", err);
+    console.error("Vercel logic failure:", err);
     res.status(500).json({ 
-      error: "Internal Server Error", 
+      error: "Erro crítico no servidor Vercel", 
       message: err.message,
-      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined 
+      env: {
+        hasServiceAccount: !!process.env.FIREBASE_SERVICE_ACCOUNT,
+        nodeEnv: process.env.NODE_ENV
+      }
     });
   }
 }

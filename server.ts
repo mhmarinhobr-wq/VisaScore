@@ -6,9 +6,6 @@ import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 import fs from "fs";
 
-// Import config statically for better bundling
-import firebaseConfig from "./firebase-applet-config.json" with { type: "json" };
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -20,7 +17,28 @@ if (databaseId === "(default)") {
   databaseId = undefined;
 }
 
-// Use imported config for databaseId if not in env
+// Helper to read config safely
+const getFirebaseConfig = () => {
+  try {
+    // __dirname is the root directory where server.ts and the config file live
+    const configPath = path.join(__dirname, "firebase-applet-config.json");
+    if (fs.existsSync(configPath)) {
+      return JSON.parse(fs.readFileSync(configPath, "utf8"));
+    }
+    // Fallback to process.cwd() if __dirname fails
+    const fallbackPath = path.join(process.cwd(), "firebase-applet-config.json");
+    if (fs.existsSync(fallbackPath)) {
+      return JSON.parse(fs.readFileSync(fallbackPath, "utf8"));
+    }
+  } catch (e) {
+    console.warn("[Firebase Admin] Could not read config file:", e);
+  }
+  return null;
+};
+
+const firebaseConfig = getFirebaseConfig();
+
+// Use config for databaseId if not in env
 if (!databaseId && firebaseConfig) {
   databaseId = (firebaseConfig as any).firestoreDatabaseId;
 }
@@ -32,8 +50,9 @@ const initializeFirebaseAdmin = () => {
 
   const serviceAccountVar = process.env.FIREBASE_SERVICE_ACCOUNT;
   
-  if (!databaseId && firebaseConfig) {
-    databaseId = (firebaseConfig as any).firestoreDatabaseId;
+  const currentConfig = getFirebaseConfig();
+  if (!databaseId && currentConfig) {
+    databaseId = (currentConfig as any).firestoreDatabaseId;
   }
 
   if (serviceAccountVar) {
@@ -388,20 +407,20 @@ async function createServer() {
       } catch (viteError: any) {
         console.error("CRITICAL: Failed to load Vite middleware:", viteError);
         if (distExists) {
-          console.log("Fallback: Serving existing dist folder since Vite failed.");
           app.use(express.static(distPath));
           app.get("*", (req, res) => res.sendFile(path.join(distPath, "index.html")));
-        } else {
-          app.get("*", (req, res) => res.status(500).send(`Application initialization failed: ${viteError.message}`));
         }
       }
     } else {
-      console.log("Production mode: serving static files from dist...");
       app.use(express.static(distPath));
       app.get("*", (req, res) => {
         res.sendFile(path.join(distPath, "index.html"));
       });
     }
+  } else {
+    // On Vercel, the static files are handled by the vercel.json rewrites, 
+    // so we don't need to serve them here. The Express app only handles /api.
+    console.log("Vercel environment detected: Express will only handle API routes.");
   }
 
   return app;

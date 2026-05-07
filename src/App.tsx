@@ -751,7 +751,11 @@ function LoginView({ onLogin }: { onLogin: () => void }) {
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        throw new Error(data.error || `Erro ao verificar acesso (Status: ${response.status}). Tente novamente.`);
+        let msg = data.error || `Erro ao verificar acesso (Status: ${response.status}). Tente novamente.`;
+        if (data.details) {
+          msg = `${msg} Detalhes: ${data.details}`;
+        }
+        throw new Error(msg);
       }
 
       if (!data.whitelisted) {

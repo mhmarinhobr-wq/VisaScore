@@ -19,7 +19,12 @@ if (databaseId === "(default)") {
 
 // Pre-read config for databaseId if possible
 try {
-  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+  let configPath = path.join(process.cwd(), "firebase-applet-config.json");
+  // Enforce absolute path check for Vercel
+  if (!fs.existsSync(configPath)) {
+    configPath = path.resolve("./firebase-applet-config.json");
+  }
+  
   if (fs.existsSync(configPath)) {
     const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
     if (!databaseId) {
@@ -39,7 +44,10 @@ const initializeFirebaseAdmin = () => {
   
   if (!databaseId) {
     try {
-      const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+      let configPath = path.join(process.cwd(), "firebase-applet-config.json");
+      if (!fs.existsSync(configPath)) {
+        configPath = path.resolve("./firebase-applet-config.json");
+      }
       if (fs.existsSync(configPath)) {
         const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
         databaseId = config.firestoreDatabaseId;

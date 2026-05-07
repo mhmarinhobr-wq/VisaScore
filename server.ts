@@ -100,14 +100,16 @@ const isProd = process.env.NODE_ENV === "production";
 console.log(`[Environment] Vercel: ${isVercel}, Production: ${isProd}, NODE_ENV: ${process.env.NODE_ENV}`);
 
 async function createServer() {
-  console.log("Creating Express server instance...");
+  console.log("[Server] createServer() called. Starting initialization...");
   const app = express();
   
   // Ensure admin is initialized
   try {
+    console.log("[Firebase Admin] Triggering initializeFirebaseAdmin()...");
     initializeFirebaseAdmin();
+    console.log("[Firebase Admin] initialization function finished.");
   } catch (e: any) {
-    console.error("Firebase Admin initialization error:", e.message);
+    console.error("[Firebase Admin] CRITICAL initialization error:", e.message);
   }
   
   const PORT = 3000;

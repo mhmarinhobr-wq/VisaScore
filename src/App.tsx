@@ -748,18 +748,12 @@ function LoginView({ onLogin }: { onLogin: () => void }) {
         body: JSON.stringify({ email: email.toLowerCase().trim() }),
       });
 
+      const data = await response.json().catch(() => ({}));
+
       if (!response.ok) {
-        let errorMsg = `Erro ao verificar acesso (Status: ${response.status}). Tente novamente.`;
-        try {
-          const errorData = await response.json();
-          errorMsg = errorData.error || errorMsg;
-        } catch (e) {
-          console.error("Failed to parse error response as JSON:", e);
-        }
-        throw new Error(errorMsg);
+        throw new Error(data.error || `Erro ao verificar acesso (Status: ${response.status}). Tente novamente.`);
       }
 
-      const data = await response.json();
       if (!data.whitelisted) {
         throw new Error(data.error || 'Nenhuma compra encontrada para este e-mail.');
       }

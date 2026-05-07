@@ -12,6 +12,11 @@ const __dirname = path.dirname(__filename);
 // Initialize Firebase Admin
 let databaseId: string | undefined = process.env.VITE_FIREBASE_DATABASE_ID || process.env.FIREBASE_DATABASE_ID;
 
+// Normalizing databaseId for default one
+if (databaseId === "(default)") {
+  databaseId = undefined;
+}
+
 // Pre-read config for databaseId if possible
 try {
   const configPath = path.join(process.cwd(), "firebase-applet-config.json");
@@ -47,6 +52,12 @@ const initializeFirebaseAdmin = () => {
   if (serviceAccountVar) {
     try {
       const trimmedValue = serviceAccountVar.trim();
+      
+      // Safety check: Is this a potential leak of another key? (Common mistake)
+      if (trimmedValue.startsWith("sk_live_") || trimmedValue.startsWith("pk_live_")) {
+        throw new Error("A variável FIREBASE_SERVICE_ACCOUNT parece conter uma chave da Stripe (sk_live...) em vez do JSON do Firebase. Por favor, gere uma nova Chave Privada no console do Firebase e cole o JSON completo.");
+      }
+
       const serviceAccount = JSON.parse(
         trimmedValue.startsWith("{") 
           ? trimmedValue 

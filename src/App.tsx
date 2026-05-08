@@ -750,24 +750,33 @@ function LoginView({ onLogin }: { onLogin: () => void }) {
 
       if (!response.ok) {
         const text = await response.text();
-        let msg = `Erro ao verificar acesso (Status: ${response.status})`;
+        let msg = `Erro do Servidor (${response.status})`;
+        let subMsg = "Não foi possível verificar seu acesso agora.";
+        let details = "";
         
         try {
           const data = JSON.parse(text);
           if (data.error) msg = data.error;
-          if (data.details) msg = `${msg}\n\nDetalhes: ${data.details}`;
-          if (data.help) msg = `${msg}\n\nAjuda: ${data.help}`;
-          if (data.message) msg = `${msg}\n\nMensagem: ${data.message}`;
-          if (data.diagnostics) msg = `${msg}\n\nDiagnóstico: ${JSON.stringify(data.diagnostics)}`;
+          if (data.message) subMsg = data.message;
+          if (data.details) details = data.details;
+          
+          if (data.help) {
+              details = `${details ? details + "\n\n" : ""}Dica: ${data.help}`;
+          }
         } catch (e) {
-          // Se não for JSON, mostra o começo do texto da resposta
-          msg = `${msg}\n\nO servidor retornou uma resposta inválida: ${text.substring(0, 200)}...`;
+          // If not JSON, it's likely a platform error
+          if (text.includes("FUNCTION_INVOCATION_FAILED")) {
+            subMsg = "O servidor travou ao tentar processar o login.";
+            details = "Isso geralmente acontece quando as chaves do Firebase estão mal formatadas ou incompletas nos Secrets.";
+          } else {
+            details = text.substring(0, 300);
+          }
         }
         
-        throw new Error(msg);
+        throw new Error(`${msg}\n\n${subMsg}${details ? "\n\n" + details : ""}`);
       }
 
-      const data = JSON.parse(await response.clone().text());
+      const data = await response.json();
 
       if (!data.whitelisted) {
         throw new Error(data.error || 'Nenhuma compra encontrada para este e-mail.');

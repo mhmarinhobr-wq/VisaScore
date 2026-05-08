@@ -9,8 +9,16 @@ import fs from "fs";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Error logging for serverless environment
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[Process] Unhandled Rejection at:', promise, 'reason:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[Process] Uncaught Exception:', err);
+});
+
 // Initialize Firebase Admin
-let databaseId: string | undefined = process.env.VITE_FIREBASE_DATABASE_ID || process.env.FIREBASE_DATABASE_ID;
+let databaseId: string | undefined = process.env.VITE_FIREBASE_DATABASE_ID || process.env.FIREBASE_DATABASE_ID || undefined;
 
 // Normalizing databaseId for default one
 if (databaseId === "(default)") {
@@ -333,120 +341,117 @@ async function createServer() {
 
   // Verify if an email is whitelisted
   app.post("/api/verify-whitelist", async (req, res) => {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ error: "O e-mail é obrigatório." });
-    const normalizedEmail = email.toLowerCase().trim();
-
-    console.log(`[Verify Whitelist] Checking access for: ${normalizedEmail}`);
-
     try {
-      if (getApps().length === 0) {
-        initializeFirebaseAdmin();
+      const { email } = req.body;
+      if (!email) {
+        console.warn("[Verify Whitelist] Request received without email.");
+        return res.status(400).json({ error: "O e-mail é obrigatório." });
+      }
+      
+      const normalizedEmail = email.toLowerCase().trim();
+      console.log(`[Verify Whitelist] Start checking: ${normalizedEmail}`);
+
+      // 1. Initialize Firebase if needed
+      try {
+        if (getApps().length === 0) {
+          console.log("[Verify Whitelist] Admin not initialized. Initializing now...");
+          initializeFirebaseAdmin();
+        }
+      } catch (initErr: any) {
+        console.error("[Verify Whitelist] Initialization failed:", initErr);
       }
 
       if (getApps().length === 0) {
+        const initErrMsg = (global as any).firebaseInitError || "Não foi possível carregar as credenciais do Firebase.";
+        console.error("[Verify Whitelist] Fatal: Firebase Admin is not loaded.");
         return res.status(500).json({ 
-          error: "O servidor não pôde inicializar o Firebase Admin.",
-          details: (global as any).firebaseInitError || "Verifique se o JSON da Service Account está correto.",
-          debug: { hasEnv: !!process.env.FIREBASE_SERVICE_ACCOUNT, isVercel: process.env.VERCEL === '1' }
+          error: "Configuração do Firebase pendente.",
+          message: initErrMsg,
+          help: "Verifique se a variável FIREBASE_SERVICE_ACCOUNT foi colada corretamente nos Secrets e se você clicou em 'Apply changes'.",
+          diagnostics: {
+            hasEnv: !!(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_AC),
+            isVercel: !!process.env.VERCEL
+          }
         });
       }
 
-      // Access logic
+      // 2. Get Firestore Instance
       let db;
       try {
         db = getFirestore(databaseId);
-        console.log(`[Verify Whitelist] Using databaseId: ${databaseId || "(default)"}`);
-      } catch (e: any) {
-        console.warn("[Firebase Admin] Initialization with Custom ID failed, using default:", e.message);
+      } catch (dbInitErr: any) {
+        console.warn(`[Verify Whitelist] Database '${databaseId}' failed, trying default.`, dbInitErr.message);
         db = getFirestore();
       }
 
-      let whitelistDoc;
+      // 3. Query Whitelist
+      let whitelistDoc = null;
       try {
         whitelistDoc = await db.collection("whitelists").doc(normalizedEmail).get();
-      } catch (dbErr: any) {
-        console.error(`[Verify Whitelist] Error on database "${databaseId || "(default)"}":`, dbErr.message);
+      } catch (queryErr: any) {
+        console.error("[Verify Whitelist] Firestore query failed:", queryErr.message);
         
-        // Hard fallback to default database
+        // Fallback check
         if (databaseId) {
-          console.log("[Verify Whitelist] Attempting HARD FALLBACK to (default) database...");
           try {
-            const defaultDb = getFirestore();
-            whitelistDoc = await defaultDb.collection("whitelists").doc(normalizedEmail).get();
-            db = defaultDb;
-            console.log("[Verify Whitelist] Hard fallback success!");
-          } catch (retryErr: any) {
-            console.error("[Verify Whitelist] All access attempts failed.");
-            return res.status(500).json({ 
-              error: "Falha ao acessar o banco de dados.",
-              message: retryErr.message,
-              details: `ERRO CRÍTICO: Não conseguimos ler a coleção 'whitelists' em nenhum banco de dados. Erro no banco '${databaseId}': ${dbErr.message}. Erro no banco '(default)': ${retryErr.message}`,
-              help: "1. Verifique se o Firestore está ATIVADO no Console Firebase (Modo Produção ou Teste). 2. Verifique se a coleção 'whitelists' existe. 3. Verifique se a Service Account tem permissão de 'Editor de Cloud Datastore'.",
-              diagnostics: {
-                hasServiceAccount: !!process.env.FIREBASE_SERVICE_ACCOUNT,
-                serviceAccountProject: getApps()[0]?.options.projectId || "unknown",
-                configProject: process.env.VITE_FIREBASE_PROJECT_ID || "unknown",
-                databaseId: databaseId || "(default)",
-                initError: (global as any).firebaseInitError || "Nenhum erro de inicialização registrado",
-                isVercel: !!process.env.VERCEL
-              },
-              debug: { 
-                databaseId, 
-                adminProjectId: getApps()[0]?.options.projectId || "unknown",
-                configProjectId: process.env.VITE_FIREBASE_PROJECT_ID || "unknown"
-              }
-            });
+            console.log("[Verify Whitelist] Retrying with default database...");
+            const fallbackDb = getFirestore();
+            whitelistDoc = await fallbackDb.collection("whitelists").doc(normalizedEmail).get();
+            db = fallbackDb; // Update db for subsequent checks
+          } catch (fallbackErr: any) {
+            throw new Error(`Erro ao conectar ao Firestore: ${queryErr.message} (e fallback falhou: ${fallbackErr.message})`);
           }
         } else {
-          return res.status(500).json({ 
-            error: "Erro de conexão com Firestore (default).",
-            message: dbErr.message,
-            help: "O banco de dados Firestore (default) foi criado no seu Console Firebase?",
-            debug: { databaseId: "(default)", initError: (global as any).firebaseInitError }
-          });
+          throw new Error(`Erro ao acessar a coleção 'whitelists': ${queryErr.message}`);
         }
       }
-      
+
+      // 4. Special cases (Creator / Admin)
       const isCreator = normalizedEmail === 'mhmarinhobr@gmail.com';
-      
       let isAdminUser = false;
       try {
         const adminDoc = await db.collection("admins").doc(normalizedEmail).get();
-        isAdminUser = adminDoc.exists;
-      } catch (adminErr) {
-        // Ignore fallback
+        isAdminUser = adminDoc?.exists || false;
+      } catch (e) {
+        // Silently ignore admin check failure
       }
 
-      if (!whitelistDoc?.exists && !isCreator && !isAdminUser) {
-        return res.json({ 
+      const isWhitelisted = (whitelistDoc?.exists) || isCreator || isAdminUser;
+
+      if (!isWhitelisted) {
+        console.log(`[Verify Whitelist] Access denied: ${normalizedEmail}`);
+        return res.status(403).json({ 
           whitelisted: false, 
-          error: "Email não cadastrado. Verifique o email usado na compra." 
+          error: "E-mail não encontrado. Use o mesmo e-mail utilizado na compra." 
         });
       }
 
-    // Check if user already exists in Auth to know if we should show Login or Register
-    let exists = false;
-    try {
-      const auth = getAuth();
-      await auth.getUserByEmail(normalizedEmail);
-      exists = true;
-    } catch (e: any) {
-        if (e.code !== 'auth/user-not-found') {
-          console.error("Auth check error:", e);
+      // 5. Check Auth status
+      let existsInAuth = false;
+      try {
+        const auth = getAuth();
+        await auth.getUserByEmail(normalizedEmail);
+        existsInAuth = true;
+      } catch (authErr: any) {
+        if (authErr.code !== 'auth/user-not-found') {
+          console.error("[Verify Whitelist] Auth lookup error:", authErr.code);
         }
       }
 
-      res.json({ 
+      console.log(`[Verify Whitelist] Access granted for: ${normalizedEmail} (Exists in Auth: ${existsInAuth})`);
+      return res.json({ 
         whitelisted: true, 
-        existsInAuth: exists,
+        existsInAuth,
         email: normalizedEmail
       });
+      
     } catch (error: any) {
-      console.error("Error in verify-whitelist:", error);
-      res.status(500).json({ 
-        error: `Erro interno no servidor ao verificar acesso: ${error.message}`,
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      console.error("[Verify Whitelist] TOP LEVEL ERROR:", error);
+      return res.status(500).json({ 
+        error: "Não foi possível acessar agora. Tente novamente em alguns minutos.",
+        message: error.message,
+        details: "Ocorreu um erro inesperado no fluxo de verificação.",
+        help: "Se o problema persistir, verifique a saúde do seu projeto no Console Firebase."
       });
     }
   });
@@ -581,9 +586,25 @@ async function createServer() {
     console.log("Vercel environment detected: Express will only handle API routes.");
   }
 
-  // Global Error Handler
+    // Global Error Handler
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     console.error("[Global Error Handler]", err);
+    
+    // Always return JSON for API routes
+    if (req.url.startsWith('/api/')) {
+      return res.status(500).json({
+        error: "Erro interno no servidor.",
+        message: err.message || "Ocorreu um erro inesperado.",
+        details: "O servidor encontrou um problema crítico ao processar esta requisição.",
+        help: "Verifique os logs do servidor para mais detalhes. Se você acabou de atualizar os Secrets, tente clicar em 'Apply changes' novamente.",
+        diagnostics: {
+          path: req.url,
+          method: req.method,
+          initError: (global as any).firebaseInitError || "unknown"
+        }
+      });
+    }
+
     res.status(500).send(`
       <div style="font-family: sans-serif; padding: 20px; color: #721c24; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px;">
         <h2 style="margin-top: 0;">Erro Crítico no Servidor</h2>

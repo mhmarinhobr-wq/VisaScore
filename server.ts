@@ -85,19 +85,29 @@ const initializeFirebaseAdmin = () => {
         initializeApp({
           credential: cert(serviceAccount)
         });
-        console.log("[Firebase Admin] Initialized successfully for project:", serviceAccount.project_id);
+        console.log(`[Firebase Admin] SUCCESS: Initialized for project "${serviceAccount.project_id}"`);
       } catch (innerErr: any) {
         if (innerErr.code === 'app/duplicate-app') {
           console.log("[Firebase Admin] App already initialized.");
         } else {
+          console.error("[Firebase Admin] initializeApp Failed:", innerErr.message);
           throw innerErr;
         }
       }
-      console.log("[Firebase Admin] Initialized for project:", serviceAccount.project_id);
+      
+      // Project ID consistency check
+      const clientProjectId = process.env.VITE_FIREBASE_PROJECT_ID;
+      if (clientProjectId && serviceAccount.project_id !== clientProjectId) {
+        console.warn(`[Firebase Admin] WARNING: Project ID Mismatch! 
+          Service Account Project: ${serviceAccount.project_id}
+          Client Config Project: ${clientProjectId}
+          This WILL cause Error 500 on Vercel unless updated.`);
+      }
+      
       console.log("[Firebase Admin] Target Database ID:", databaseId || "(default)");
     } catch (e: any) {
       console.error("[Firebase Admin] Initialization error:", e.message);
-      (global as any).firebaseInitError = e.message;
+      (global as any).firebaseInitError = `Erro na Service Account: ${e.message}`;
     }
   } else {
     console.warn("[Firebase Admin] FIREBASE_SERVICE_ACCOUNT is missing.");
@@ -348,10 +358,11 @@ async function createServer() {
               error: "Falha ao acessar o banco de dados.",
               message: retryErr.message,
               details: `Erro no banco '${databaseId}': ${dbErr.message}. Erro no banco '(default)': ${retryErr.message}`,
-              help: "Verifique se a variável FIREBASE_SERVICE_ACCOUNT está correta na Vercel e se o Firestore foi ativado.",
+              help: "URGENTE: Como você mudou de projeto no Firebase, você PRECISA atualizar o JSON da 'FIREBASE_SERVICE_ACCOUNT' na Vercel para o novo projeto. O erro indica que as credenciais atuais não têm acesso a este projeto.",
               debug: { 
                 databaseId, 
-                projectId: getApps()[0]?.options.projectId || "unknown",
+                adminProjectId: getApps()[0]?.options.projectId || "unknown",
+                configProjectId: process.env.VITE_FIREBASE_PROJECT_ID || "unknown",
                 initError: (global as any).firebaseInitError
               }
             });

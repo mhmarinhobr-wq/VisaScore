@@ -1,6 +1,6 @@
 {
-  "name": "VisaScore Pro",
-  "description": "Sistema robusto de análise de perfil para visto americano com acesso seguro via e-mail e senha, integrado com WIAPY.",
+  "name": "VisaScore",
+  "description": "Plataforma inteligente de análise e preparação para o visto americano.",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }

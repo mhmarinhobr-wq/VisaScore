@@ -346,9 +346,9 @@ export default function App() {
           <NavItem active={currentView === 'dashboard' && !readerContent} icon={<LayoutDashboard size={20} />} label="Dashboard" onClick={() => { setCurrentView('dashboard'); setReaderContent(null); setIsMenuOpen(false); }} />
           <NavItem active={currentView === 'simulator'} icon={<Play size={20} />} label="Simulador" onClick={() => { setCurrentView('simulator'); setReaderContent(null); setIsMenuOpen(false); }} />
           <NavItem active={currentView === 'result'} icon={<CheckCircle2 size={20} />} label="Resultado" onClick={() => { setCurrentView('result'); setReaderContent(null); setIsMenuOpen(false); }} />
-          <NavItem active={false} icon={<FileText size={20} />} label="Guia DS-160" onClick={() => { window.open(appContent.ds160_1, '_blank'); setIsMenuOpen(false); }} />
+          <NavItem active={false} icon={<FileText size={20} />} label="Guia DS-160" onClick={() => { onViewReader({ title: 'Guia DS-160 - Parte 1', url: appContent.ds160_1 }); setIsMenuOpen(false); }} />
           <NavItem active={currentView === 'checklist'} icon={<ClipboardCheck size={20} />} label="Checklist Final" onClick={() => { setCurrentView('checklist'); setIsMenuOpen(false); }} />
-          <NavItem active={false} icon={<GraduationCap size={20} />} label="Preparação" onClick={() => { window.open(appContent.preparation, '_blank'); setIsMenuOpen(false); }} />
+          <NavItem active={false} icon={<GraduationCap size={20} />} label="Preparação" onClick={() => { onViewReader({ title: 'Preparação Entrevista', url: appContent.preparation }); setIsMenuOpen(false); }} />
           
           {profile?.isAdmin && (
             <div className="mt-6 pt-6 border-t border-white/10 space-y-1">
@@ -464,10 +464,10 @@ function Dashboard({ onStart, onView, onViewReader, hasResult, appContent }: {
             <p className="text-slate-500 text-sm">O mapa completo dividido em 4 etapas essenciais.</p>
           </div>
           <div className="grid grid-cols-2 gap-2 w-full">
-            <button onClick={() => window.open(appContent.ds160_1, '_blank')} className="text-[10px] font-bold py-2 bg-white border border-brand-red/20 text-brand-red rounded-lg hover:bg-brand-red hover:text-white transition-all uppercase tracking-widest text-center">Parte 1</button>
-            <button onClick={() => window.open(appContent.ds160_2, '_blank')} className="text-[10px] font-bold py-2 bg-white border border-brand-red/20 text-brand-red rounded-lg hover:bg-brand-red hover:text-white transition-all uppercase tracking-widest text-center">Parte 2</button>
-            <button onClick={() => window.open(appContent.ds160_3, '_blank')} className="text-[10px] font-bold py-2 bg-white border border-brand-red/20 text-brand-red rounded-lg hover:bg-brand-red hover:text-white transition-all uppercase tracking-widest text-center">Parte 3</button>
-            <button onClick={() => window.open(appContent.ds160_4, '_blank')} className="text-[10px] font-bold py-2 bg-white border border-brand-red/20 text-brand-red rounded-lg hover:bg-brand-red hover:text-white transition-all uppercase tracking-widest text-center">Parte 4</button>
+            <button onClick={() => onViewReader({ title: 'Guia DS-160 - Parte 1', url: appContent.ds160_1 })} className="text-[10px] font-bold py-2 bg-white border border-brand-red/20 text-brand-red rounded-lg hover:bg-brand-red hover:text-white transition-all uppercase tracking-widest text-center">Parte 1</button>
+            <button onClick={() => onViewReader({ title: 'Guia DS-160 - Parte 2', url: appContent.ds160_2 })} className="text-[10px] font-bold py-2 bg-white border border-brand-red/20 text-brand-red rounded-lg hover:bg-brand-red hover:text-white transition-all uppercase tracking-widest text-center">Parte 2</button>
+            <button onClick={() => onViewReader({ title: 'Guia DS-160 - Parte 3', url: appContent.ds160_3 })} className="text-[10px] font-bold py-2 bg-white border border-brand-red/20 text-brand-red rounded-lg hover:bg-brand-red hover:text-white transition-all uppercase tracking-widest text-center">Parte 3</button>
+            <button onClick={() => onViewReader({ title: 'Guia DS-160 - Parte 4', url: appContent.ds160_4 })} className="text-[10px] font-bold py-2 bg-white border border-brand-red/20 text-brand-red rounded-lg hover:bg-brand-red hover:text-white transition-all uppercase tracking-widest text-center">Parte 4</button>
           </div>
         </div>
 
@@ -486,7 +486,7 @@ function Dashboard({ onStart, onView, onViewReader, hasResult, appContent }: {
         </button>
 
         {/* Preparação Card */}
-        <button className="glass-card p-8 flex flex-col items-start gap-6 hover:border-brand-blue/30 hover:bg-slate-50 transition-all cursor-pointer group text-left w-full" onClick={() => window.open(appContent.preparation, '_blank')}>
+        <button className="glass-card p-8 flex flex-col items-start gap-6 hover:border-brand-blue/30 hover:bg-slate-50 transition-all cursor-pointer group text-left w-full" onClick={() => onViewReader({ title: 'Preparação Entrevista', url: appContent.preparation })}>
           <div className="w-14 h-14 bg-brand-blue rounded-2xl flex items-center justify-center text-white shadow-xl shadow-brand-blue/20">
             <GraduationCap size={28} />
           </div>
@@ -659,16 +659,36 @@ function ResultView({ result, onReset }: { result: SimulationResult | null, onRe
 
 function Reader({ title, url, onClose }: { title: string, url: string, onClose: () => void }) {
   // Lógica de conversão de link para Embed do Gamma ultra-resiliente
-  let secureUrl = url;
-  if (url && url.includes('gamma.app')) {
-    const match = url.match(/\/(public|docs|view|embed)\/([^/?#]+)/);
-    if (match && match[2]) {
-      const lastPart = match[2];
-      const id = lastPart.includes('-') ? lastPart.split('-').pop() : lastPart;
-      // tr=true ajuda na transição mobile do Gamma
-      if (id) secureUrl = `https://gamma.app/embed/${id}?tr=true`;
+  const [isImages, setIsImages] = useState(false);
+  const [imageUrlList, setImageUrlList] = useState<string[]>([]);
+  const [secureUrl, setSecureUrl] = useState('');
+
+  useEffect(() => {
+    if (!url) return;
+
+    // Detect if it's a list of images or a single direct image link
+    const links = url.split(',').map(l => l.trim()).filter(l => l.length > 0);
+    const isImageContent = links.every(l => l.match(/\.(jpeg|jpg|gif|png|webp|svg)/i) || l.includes('images.unsplash.com'));
+
+    if (isImageContent) {
+      setIsImages(true);
+      setImageUrlList(links);
+    } else if (url.includes('gamma.app')) {
+      setIsImages(false);
+      let embedUrl = url;
+      const match = url.match(/\/(public|docs|view|embed)\/([^/?#]+)/);
+      if (match && match[2]) {
+        const lastPart = match[2];
+        const id = lastPart.includes('-') ? lastPart.split('-').pop() : lastPart;
+        // tr=true helps mobile transitions in Gamma
+        if (id) embedUrl = `https://gamma.app/embed/${id}?tr=true`;
+      }
+      setSecureUrl(embedUrl);
+    } else {
+      setIsImages(false);
+      setSecureUrl(url);
     }
-  }
+  }, [url]);
 
   return (
     <div className="fixed inset-0 z-[200] bg-white flex flex-col animate-in fade-in duration-200">
@@ -693,12 +713,25 @@ function Reader({ title, url, onClose }: { title: string, url: string, onClose: 
       </div>
       
       {/* Área de Conteúdo Force Fill */}
-      <div className="flex-1 bg-slate-50 relative overflow-hidden">
+      <div className="flex-1 bg-slate-50 relative overflow-hidden overflow-y-auto">
         {!url ? (
           <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-4 font-sans p-6 text-center">
             <FileText size={48} />
             <p className="font-medium text-lg">Conteúdo não disponível.</p>
             <p className="text-sm">Link não configurado corretamente.</p>
+          </div>
+        ) : isImages ? (
+          <div className="flex flex-col items-center w-full min-h-full bg-slate-900 overflow-y-auto py-4 md:py-8">
+            {imageUrlList.map((img, idx) => (
+              <img 
+                key={idx} 
+                src={img} 
+                alt={`${title} - pág ${idx + 1}`} 
+                className="w-full max-w-4xl shadow-2xl mb-1 object-contain"
+                loading="lazy"
+                referrerPolicy="no-referrer"
+              />
+            ))}
           </div>
         ) : (
           <div className="absolute inset-0 w-full h-full">

@@ -40,14 +40,16 @@ if (!databaseId && firebaseConfig && firebaseConfig.firestoreDatabaseId) {
 const initializeFirebaseAdmin = () => {
   if (getApps().length > 0) return;
 
-  const serviceAccountVar = process.env.FIREBASE_SERVICE_ACCOUNT;
+  // Suporte a ambos os nomes (Vercel costuma truncar nomes longos em algumas interfaces)
+  const serviceAccountVar = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_AC || process.env.FIREBASE_CONFIG;
   
+  console.log(`[Firebase Admin] Chave encontrada? ${!!serviceAccountVar} (Tamanho: ${serviceAccountVar?.length || 0})`);
+
   if (serviceAccountVar) {
     try {
       let trimmedValue = serviceAccountVar.trim();
       
       // Extensive cleanup for common copy-paste errors
-      // 1. Remove Markdown code blocks if present
       if (trimmedValue.startsWith("```")) {
         const matches = trimmedValue.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
         if (matches && matches[1]) {
@@ -55,7 +57,6 @@ const initializeFirebaseAdmin = () => {
         }
       }
       
-      // 2. Remove surrounding quotes (single or double)
       if ((trimmedValue.startsWith("'") && trimmedValue.endsWith("'")) || 
           (trimmedValue.startsWith('"') && trimmedValue.endsWith('"'))) {
         trimmedValue = trimmedValue.substring(1, trimmedValue.length - 1).trim();
@@ -65,30 +66,24 @@ const initializeFirebaseAdmin = () => {
       
       if (trimmedValue.startsWith("{")) {
         try {
-          // Final cleanup: sometimes users leave trailing commas or comments
-          // Simple JSON.parse usually fails on those, but we try standard first
           serviceAccount = JSON.parse(trimmedValue);
         } catch (jsonErr: any) {
-          console.error("[Firebase Admin] JSON.parse failed. Content preview:", trimmedValue.substring(0, 50) + "...");
+          console.error("[Firebase Admin] Erro ao processar JSON. Prévia:", trimmedValue.substring(0, 30));
           
-          // Try to fix missing double quotes on keys if someone pasted raw JS object
-          // This is risky but helps in some cases
           try {
-             // Basic attempt to fix unquoted keys or single quotes
              const fixedJson = trimmedValue
                .replace(/(['"])?([a-z0-9A-Z_]+)(['"])?:/g, '"$2":')
                .replace(/'/g, '"');
              serviceAccount = JSON.parse(fixedJson);
           } catch (e2) {
-             throw new Error(`O JSON da FIREBASE_SERVICE_ACCOUNT está inválido. Certifique-se de que ele começa com { e termina com } e não tem aspas extras por fora. Erro original: ${jsonErr.message}`);
+             throw new Error(`JSON INVÁLIDO: O texto colado nos Secrets não é um JSON válido. Certifique-se de copiar desde o '{' até o '}'. Erro: ${jsonErr.message}`);
           }
         }
       } else {
-        // Try base64
         try {
           serviceAccount = JSON.parse(Buffer.from(trimmedValue, 'base64').toString());
         } catch {
-          throw new Error("A variável FIREBASE_SERVICE_ACCOUNT não parece um JSON válido (não começa com {) e não é um Base64 válido.");
+          throw new Error("A variável não é um JSON nem um código Base64 válido.");
         }
       }
       
@@ -97,10 +92,9 @@ const initializeFirebaseAdmin = () => {
         if (!serviceAccount.project_id) fields.push("project_id");
         if (!serviceAccount.private_key) fields.push("private_key");
         if (!serviceAccount.client_email) fields.push("client_email");
-        throw new Error(`Dados faltando no JSON da Service Account: ${fields.join(", ")}. Você precisa copiar o arquivo JSON COMPLETO que baixou no console do Firebase.`);
+        throw new Error(`Campos faltando no JSON: ${fields.join(", ")}. Você copiou o arquivo inteiro?`);
       }
 
-      // Vercel/Environment specific private key fix
       if (typeof serviceAccount.private_key === 'string') {
         let key = serviceAccount.private_key.replace(/\\n/g, '\n');
         
@@ -116,32 +110,32 @@ const initializeFirebaseAdmin = () => {
       }
       
       try {
+        console.log(`[Firebase Admin] Tentando inicializar projeto: ${serviceAccount.project_id}`);
         initializeApp({
           credential: cert(serviceAccount)
         });
-        console.log(`[Firebase Admin] SUCCESS: Initialized for project "${serviceAccount.project_id}"`);
+        console.log(`[Firebase Admin] SUCESSO: Firebase inicializado.`);
       } catch (innerErr: any) {
         if (innerErr.code === 'app/duplicate-app') {
-          console.log("[Firebase Admin] App already initialized.");
+          console.log("[Firebase Admin] App já estava inicializado.");
         } else {
-          console.error("[Firebase Admin] initializeApp Failed:", innerErr.message);
-          throw new Error(`O Firebase rejeitou sua Service Account: ${innerErr.message}`);
+          console.error("[Firebase Admin] Falha no initializeApp:", innerErr.message);
+          throw new Error(`O Firebase rejeitou as credenciais: ${innerErr.message}`);
         }
       }
       
-      // Project ID consistency check
       const clientProjectId = process.env.VITE_FIREBASE_PROJECT_ID;
       if (clientProjectId && serviceAccount.project_id !== clientProjectId) {
-        console.warn(`[Firebase Admin] AVISO: Project ID mismatch! Service Account (${serviceAccount.project_id}) vs Configuração (${clientProjectId})`);
+        console.warn(`[Firebase Admin] AVISO: O Project ID da chave (${serviceAccount.project_id}) é diferente do configurado no app (${clientProjectId}). Isso pode causar erros.`);
       }
       
     } catch (e: any) {
-      console.error("[Firebase Admin] Initialization error:", e.message);
+      console.error("[Firebase Admin] Erro de configuração:", e.message);
       (global as any).firebaseInitError = e.message;
     }
   } else {
-    console.warn("[Firebase Admin] FIREBASE_SERVICE_ACCOUNT is missing.");
-    (global as any).firebaseInitError = "A variável FIREBASE_SERVICE_ACCOUNT não foi encontrada no ambiente da Vercel.";
+    console.warn("[Firebase Admin] FIREBASE_SERVICE_ACCOUNT não encontrada.");
+    (global as any).firebaseInitError = "A chave 'FIREBASE_SERVICE_ACCOUNT' não foi adicionada aos Secrets do AI Studio ou o botão 'Apply changes' não foi clicado.";
   }
 };
 
@@ -590,11 +584,15 @@ async function createServer() {
   // Global Error Handler
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     console.error("[Global Error Handler]", err);
-    res.status(500).json({
-      error: "Ocorreu um erro inesperado no servidor.",
-      message: err.message,
-      stack: process.env.NODE_ENV === "development" ? err.stack : undefined
-    });
+    res.status(500).send(`
+      <div style="font-family: sans-serif; padding: 20px; color: #721c24; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px;">
+        <h2 style="margin-top: 0;">Erro Crítico no Servidor</h2>
+        <p>O servidor encontrou um problema e não pôde processar o pedido.</p>
+        <p><strong>Detalhes:</strong> ${err.message}</p>
+        <hr/>
+        <p>Dica: Verifique se você clicou no botão <strong>"Apply changes"</strong> na aba de <strong>Secrets</strong> do AI Studio.</p>
+      </div>
+    `);
   });
 
   return app;

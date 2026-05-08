@@ -42,7 +42,7 @@ export interface UserProfile {
   displayName: string;
   email: string;
   status: 'active' | 'blocked' | 'pending';
-  lastAccess: string;
+  lastAccess?: string;
   createdAt: string;
   isAdmin?: boolean;
 }

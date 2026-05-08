@@ -1441,8 +1441,20 @@ function AdminUsers() {
                       </span>
                     </td>
                     <td className="px-6 py-4 text-xs text-slate-400">
-                      <div>L: {new Date(u.lastAccess).toLocaleDateString()}</div>
-                      <div>C: {new Date(u.createdAt).toLocaleDateString()}</div>
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-slate-500">Acesso:</span>
+                          {u.lastAccess ? (
+                             <span className="text-brand-blue font-medium">{new Date(u.lastAccess).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                          ) : (
+                             <span className="text-brand-red font-bold uppercase tracking-tighter">Nunca acessou</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-slate-400">Registro:</span>
+                          <span>{new Date(u.createdAt).toLocaleDateString('pt-BR')}</span>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex justify-end gap-2">
@@ -1467,13 +1479,15 @@ function AdminUsers() {
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100">
                   <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-widest">E-mail Liberado</th>
+                  <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-widest">Status / Acesso</th>
                   <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-widest">Fonte</th>
-                  <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-widest">Data</th>
                   <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-widest text-right">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {whitelists.map((w, index) => (
+                {whitelists.map((w, index) => {
+                  const registeredUser = users.find(u => u.email === w.email);
+                  return (
                   <tr key={`${w.id || w.email}-${index}`} className="hover:bg-slate-50/50 transition-colors">
                     <td className="px-6 py-4">
                       <div className="flex flex-col">
@@ -1482,12 +1496,23 @@ function AdminUsers() {
                       </div>
                     </td>
                     <td className="px-6 py-4">
+                      <div className="flex flex-col gap-1">
+                        {registeredUser ? (
+                          <>
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-600 text-[10px] font-bold w-fit">REGISTRADO</span>
+                            <span className="text-[10px] text-slate-400">
+                              U.A: {registeredUser.lastAccess ? new Date(registeredUser.lastAccess).toLocaleDateString('pt-BR') : 'Nunca'}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-400 text-[10px] font-bold w-fit">AGUARDANDO ACESSO</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
                       <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-widest ${w.source === 'wiapy' ? 'bg-orange-100 text-orange-600' : 'bg-brand-blue/10 text-brand-blue'}`}>
                         {w.source}
                       </span>
-                    </td>
-                    <td className="px-6 py-4 text-xs text-slate-400">
-                      {w.purchasedAt ? new Date(w.purchasedAt).toLocaleString() : '-'}
                     </td>
                     <td className="px-6 py-4 text-right">
                       <button onClick={() => removeFromWhitelist(w.email)} className="p-2 hover:bg-red-50 rounded-lg text-slate-400 hover:text-brand-red transition-colors">
@@ -1495,7 +1520,8 @@ function AdminUsers() {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
                 {whitelists.length === 0 && (
                   <tr>
                     <td colSpan={4} className="px-6 py-10 text-center text-slate-400 italic text-sm">

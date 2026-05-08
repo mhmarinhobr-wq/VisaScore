@@ -64,16 +64,35 @@ const initializeFirebaseAdmin = () => {
 
       // Vercel/Environment specific private key fix
       if (typeof serviceAccount.private_key === 'string') {
-        serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
-        // Double escape fix for some serverless environments
-        if (!serviceAccount.private_key.includes('\n') && serviceAccount.private_key.includes('BEGIN PRIVATE KEY')) {
-           serviceAccount.private_key = serviceAccount.private_key.split(' ').join('\n').replace('BEGIN\nPRIVATE\nKEY', 'BEGIN PRIVATE KEY').replace('END\nPRIVATE\nKEY', 'END PRIVATE KEY');
+        // Step 1: Replace literal "\n" strings with real newlines
+        let key = serviceAccount.private_key.replace(/\\n/g, '\n');
+        
+        // Step 2: Handle cases where environmental variable stripped all newlines 
+        // but left spaces or nothing between fragments
+        if (!key.includes('\n') && key.includes('---')) {
+           // This looks like a PEM key that lost its newlines
+           const match = key.match(/-----BEGIN PRIVATE KEY-----([^-]+)-----END PRIVATE KEY-----/);
+           if (match) {
+             const body = match[1].replace(/\s+/g, '\n');
+             key = `-----BEGIN PRIVATE KEY-----\n${body}\n-----END PRIVATE KEY-----\n`;
+           }
         }
+        
+        serviceAccount.private_key = key;
       }
       
-      initializeApp({
-        credential: cert(serviceAccount)
-      });
+      try {
+        initializeApp({
+          credential: cert(serviceAccount)
+        });
+        console.log("[Firebase Admin] Initialized successfully for project:", serviceAccount.project_id);
+      } catch (innerErr: any) {
+        if (innerErr.code === 'app/duplicate-app') {
+          console.log("[Firebase Admin] App already initialized.");
+        } else {
+          throw innerErr;
+        }
+      }
       console.log("[Firebase Admin] Initialized for project:", serviceAccount.project_id);
       console.log("[Firebase Admin] Target Database ID:", databaseId || "(default)");
     } catch (e: any) {

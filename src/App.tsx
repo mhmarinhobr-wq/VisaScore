@@ -818,15 +818,21 @@ function LoginView({ onLogin }: { onLogin: () => void }) {
       await createUserWithEmailAndPassword(auth, email, password);
       // Profile will be created by onAuthStateChanged listener
     } catch (err: any) {
-      console.error(err);
+      console.error("SignUp Error:", err);
+      let msg = 'Erro ao criar senha. Tente novamente.';
       if (err.code === 'auth/email-already-in-use') {
         setStatus('ENTER_PASSWORD');
-        setError('E-mail já possui senha cadastrada. Faça login.');
+        msg = 'E-mail já possui senha cadastrada. Faça login.';
       } else if (err.code === 'auth/weak-password') {
-        setError('A senha é muito fraca. Use pelo menos 6 caracteres.');
+        msg = 'A senha é muito fraca. Use pelo menos 6 caracteres.';
+      } else if (err.code === 'auth/operation-not-allowed') {
+        msg = 'O login com E-mail/Senha está desativado no seu Console Firebase. Ative-o em Authentication > Sign-in method.';
+      } else if (err.code === 'auth/internal-error') {
+        msg = 'Erro interno do Firebase. Verifique as configurações do projeto.';
       } else {
-        setError('Erro ao criar senha. Tente novamente.');
+        msg = `Erro ao criar senha: ${err.message} (Código: ${err.code || 'unknown'})`;
       }
+      setError(msg);
     } finally {
       setLoading(false);
     }

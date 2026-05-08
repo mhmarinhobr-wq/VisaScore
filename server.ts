@@ -54,16 +54,21 @@ const initializeFirebaseAdmin = () => {
         try {
           serviceAccount = JSON.parse(Buffer.from(trimmedValue, 'base64').toString());
         } catch {
-          throw new Error("Formato de Service Account inválido (não é JSON nem Base64).");
+          throw new Error("Formato de Service Account inválido.");
         }
       }
       
       if (!serviceAccount.project_id || !serviceAccount.private_key || !serviceAccount.client_email) {
-        throw new Error("JSON da Service Account incompleto (faltam campos obrigatórios).");
+        throw new Error("JSON da Service Account incompleto.");
       }
 
-      if (serviceAccount.private_key && typeof serviceAccount.private_key === 'string') {
+      // Vercel/Environment specific private key fix
+      if (typeof serviceAccount.private_key === 'string') {
         serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+        // Double escape fix for some serverless environments
+        if (!serviceAccount.private_key.includes('\n') && serviceAccount.private_key.includes('BEGIN PRIVATE KEY')) {
+           serviceAccount.private_key = serviceAccount.private_key.split(' ').join('\n').replace('BEGIN\nPRIVATE\nKEY', 'BEGIN PRIVATE KEY').replace('END\nPRIVATE\nKEY', 'END PRIVATE KEY');
+        }
       }
       
       initializeApp({
@@ -130,16 +135,32 @@ async function createServer() {
   // Diagnostic Endpoint
   app.get("/api/debug-firebase", async (req, res) => {
     try {
-      if (getApps().length === 0) initializeFirebaseAdmin();
-      const apps = getApps().map(a => ({ name: a.name, projectId: (a.options as any).credential?.projectId || "unknown" }));
+      if (getApps().length === 0) {
+        console.log("[Debug] Re-init triggered via debug endpoint");
+        initializeFirebaseAdmin();
+      }
+      const apps = getApps().map(a => ({ 
+        name: a.name, 
+        projectId: (a.options as any).credential?.projectId || (a.options as any).projectId || "unknown" 
+      }));
       
       let dbStatus = "Not tested";
       try {
         const db = getFirestore(databaseId);
         const test = await db.collection("whitelists").limit(1).get();
-        dbStatus = `Connected. Found ${test.size} docs in whitelists.`;
+        dbStatus = `Connected to '${databaseId || '(default)'}'. Found ${test.size} docs.`;
       } catch (e: any) {
-        dbStatus = `Error: ${e.message}`;
+        dbStatus = `Error on '${databaseId || '(default)'}': ${e.message}`;
+        // Try default as well
+        if (databaseId) {
+          try {
+            const defaultDb = getFirestore();
+            const testDefault = await defaultDb.collection("whitelists").limit(1).get();
+            dbStatus += ` | Default DB fallback WORKS: Found ${testDefault.size} docs.`;
+          } catch (e2: any) {
+            dbStatus += ` | Default DB fallback also FAILED: ${e2.message}`;
+          }
+        }
       }
 
       res.json({
@@ -147,7 +168,12 @@ async function createServer() {
         initError: (global as any).firebaseInitError || "none",
         apps,
         databaseId: databaseId || "(default)",
-        dbStatus
+        dbStatus,
+        env: {
+          hasKey: !!process.env.FIREBASE_SERVICE_ACCOUNT,
+          keyLength: process.env.FIREBASE_SERVICE_ACCOUNT?.length || 0,
+          isVercel: !!process.env.VERCEL
+        }
       });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -273,47 +299,50 @@ async function createServer() {
         });
       }
 
-      // Try with specified databaseId, fallback to (default) if it fails
+      // Access logic
       let db;
       try {
         db = getFirestore(databaseId);
-        console.log(`[Verify Whitelist] Initializing session with databaseId: ${databaseId || "(default)"}`);
+        console.log(`[Verify Whitelist] Using databaseId: ${databaseId || "(default)"}`);
       } catch (e: any) {
-        console.warn("[Firebase Admin] Could not initialize Firestore with provided ID, falling back to default.", e.message);
+        console.warn("[Firebase Admin] Initialization with Custom ID failed, using default:", e.message);
         db = getFirestore();
       }
-
-      console.log(`[Verify Whitelist] Attempting query...`);
 
       let whitelistDoc;
       try {
         whitelistDoc = await db.collection("whitelists").doc(normalizedEmail).get();
       } catch (dbErr: any) {
-        console.warn(`[Verify Whitelist] Primary access failed:`, dbErr.message);
+        console.error(`[Verify Whitelist] Error on database "${databaseId || "(default)"}":`, dbErr.message);
         
-        // If we were using a specific databaseId and it failed, try the (default) one as hard fallback
+        // Hard fallback to default database
         if (databaseId) {
-          console.log("[Verify Whitelist] Hard fallback Attempt: Using default database...");
+          console.log("[Verify Whitelist] Attempting HARD FALLBACK to (default) database...");
           try {
             const defaultDb = getFirestore();
             whitelistDoc = await defaultDb.collection("whitelists").doc(normalizedEmail).get();
             db = defaultDb;
-            console.log("[Verify Whitelist] Success with default database!");
+            console.log("[Verify Whitelist] Hard fallback success!");
           } catch (retryErr: any) {
-            console.error("[Verify Whitelist] All database attempts failed.");
+            console.error("[Verify Whitelist] All access attempts failed.");
             return res.status(500).json({ 
-              error: "Não foi possível acessar o Firestore.",
-              details: `Erro no banco "${databaseId}": ${dbErr.message}. Erro no banco padrão: ${retryErr.message}`,
-              help: "Certifique-se de que o Cloud Firestore foi ATIVADO no console do Firebase e que o banco de dados existe.",
-              debug: { databaseId, projectId: getApps()[0]?.options.credential ? "Loaded" : "Missing" }
+              error: "Falha ao acessar o banco de dados.",
+              message: retryErr.message,
+              details: `Erro no banco '${databaseId}': ${dbErr.message}. Erro no banco '(default)': ${retryErr.message}`,
+              help: "Verifique se a variável FIREBASE_SERVICE_ACCOUNT está correta na Vercel e se o Firestore foi ativado.",
+              debug: { 
+                databaseId, 
+                projectId: getApps()[0]?.options.projectId || "unknown",
+                initError: (global as any).firebaseInitError
+              }
             });
           }
         } else {
           return res.status(500).json({ 
-            error: "Erro de conexão com Firestore.",
-            details: dbErr.message,
-            help: "O banco de dados (default) existe e está ativo no seu console Firebase?",
-            debug: { databaseId: "(default)" }
+            error: "Erro de conexão com Firestore (default).",
+            message: dbErr.message,
+            help: "O banco de dados Firestore (default) foi criado no seu Console Firebase?",
+            debug: { databaseId: "(default)", initError: (global as any).firebaseInitError }
           });
         }
       }

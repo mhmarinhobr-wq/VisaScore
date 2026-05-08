@@ -44,38 +44,72 @@ const initializeFirebaseAdmin = () => {
   
   if (serviceAccountVar) {
     try {
-      const trimmedValue = serviceAccountVar.trim();
+      let trimmedValue = serviceAccountVar.trim();
+      
+      // Extensive cleanup for common copy-paste errors
+      // 1. Remove Markdown code blocks if present
+      if (trimmedValue.startsWith("```")) {
+        const matches = trimmedValue.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+        if (matches && matches[1]) {
+          trimmedValue = matches[1].trim();
+        }
+      }
+      
+      // 2. Remove surrounding quotes (single or double)
+      if ((trimmedValue.startsWith("'") && trimmedValue.endsWith("'")) || 
+          (trimmedValue.startsWith('"') && trimmedValue.endsWith('"'))) {
+        trimmedValue = trimmedValue.substring(1, trimmedValue.length - 1).trim();
+      }
+      
       let serviceAccount;
       
       if (trimmedValue.startsWith("{")) {
-        serviceAccount = JSON.parse(trimmedValue);
+        try {
+          // Final cleanup: sometimes users leave trailing commas or comments
+          // Simple JSON.parse usually fails on those, but we try standard first
+          serviceAccount = JSON.parse(trimmedValue);
+        } catch (jsonErr: any) {
+          console.error("[Firebase Admin] JSON.parse failed. Content preview:", trimmedValue.substring(0, 50) + "...");
+          
+          // Try to fix missing double quotes on keys if someone pasted raw JS object
+          // This is risky but helps in some cases
+          try {
+             // Basic attempt to fix unquoted keys or single quotes
+             const fixedJson = trimmedValue
+               .replace(/(['"])?([a-z0-9A-Z_]+)(['"])?:/g, '"$2":')
+               .replace(/'/g, '"');
+             serviceAccount = JSON.parse(fixedJson);
+          } catch (e2) {
+             throw new Error(`O JSON da FIREBASE_SERVICE_ACCOUNT está inválido. Certifique-se de que ele começa com { e termina com } e não tem aspas extras por fora. Erro original: ${jsonErr.message}`);
+          }
+        }
       } else {
         // Try base64
         try {
           serviceAccount = JSON.parse(Buffer.from(trimmedValue, 'base64').toString());
         } catch {
-          throw new Error("Formato de Service Account inválido.");
+          throw new Error("A variável FIREBASE_SERVICE_ACCOUNT não parece um JSON válido (não começa com {) e não é um Base64 válido.");
         }
       }
       
       if (!serviceAccount.project_id || !serviceAccount.private_key || !serviceAccount.client_email) {
-        throw new Error("JSON da Service Account incompleto.");
+        const fields = [];
+        if (!serviceAccount.project_id) fields.push("project_id");
+        if (!serviceAccount.private_key) fields.push("private_key");
+        if (!serviceAccount.client_email) fields.push("client_email");
+        throw new Error(`Dados faltando no JSON da Service Account: ${fields.join(", ")}. Você precisa copiar o arquivo JSON COMPLETO que baixou no console do Firebase.`);
       }
 
       // Vercel/Environment specific private key fix
       if (typeof serviceAccount.private_key === 'string') {
-        // Step 1: Replace literal "\n" strings with real newlines
         let key = serviceAccount.private_key.replace(/\\n/g, '\n');
         
-        // Step 2: Handle cases where environmental variable stripped all newlines 
-        // but left spaces or nothing between fragments
         if (!key.includes('\n') && key.includes('---')) {
-           // This looks like a PEM key that lost its newlines
-           const match = key.match(/-----BEGIN PRIVATE KEY-----([^-]+)-----END PRIVATE KEY-----/);
-           if (match) {
-             const body = match[1].replace(/\s+/g, '\n');
-             key = `-----BEGIN PRIVATE KEY-----\n${body}\n-----END PRIVATE KEY-----\n`;
-           }
+            const match = key.match(/-----BEGIN PRIVATE KEY-----([^-]+)-----END PRIVATE KEY-----/);
+            if (match) {
+              const body = match[1].replace(/\s+/g, '\n');
+              key = `-----BEGIN PRIVATE KEY-----\n${body}\n-----END PRIVATE KEY-----\n`;
+            }
         }
         
         serviceAccount.private_key = key;
@@ -91,27 +125,23 @@ const initializeFirebaseAdmin = () => {
           console.log("[Firebase Admin] App already initialized.");
         } else {
           console.error("[Firebase Admin] initializeApp Failed:", innerErr.message);
-          throw innerErr;
+          throw new Error(`O Firebase rejeitou sua Service Account: ${innerErr.message}`);
         }
       }
       
       // Project ID consistency check
       const clientProjectId = process.env.VITE_FIREBASE_PROJECT_ID;
       if (clientProjectId && serviceAccount.project_id !== clientProjectId) {
-        console.warn(`[Firebase Admin] WARNING: Project ID Mismatch! 
-          Service Account Project: ${serviceAccount.project_id}
-          Client Config Project: ${clientProjectId}
-          This WILL cause Error 500 on Vercel unless updated.`);
+        console.warn(`[Firebase Admin] AVISO: Project ID mismatch! Service Account (${serviceAccount.project_id}) vs Configuração (${clientProjectId})`);
       }
       
-      console.log("[Firebase Admin] Target Database ID:", databaseId || "(default)");
     } catch (e: any) {
       console.error("[Firebase Admin] Initialization error:", e.message);
-      (global as any).firebaseInitError = `Erro na Service Account: ${e.message}`;
+      (global as any).firebaseInitError = e.message;
     }
   } else {
     console.warn("[Firebase Admin] FIREBASE_SERVICE_ACCOUNT is missing.");
-    (global as any).firebaseInitError = "Variável FIREBASE_SERVICE_ACCOUNT não definida.";
+    (global as any).firebaseInitError = "A variável FIREBASE_SERVICE_ACCOUNT não foi encontrada no ambiente da Vercel.";
   }
 };
 
@@ -357,13 +387,20 @@ async function createServer() {
             return res.status(500).json({ 
               error: "Falha ao acessar o banco de dados.",
               message: retryErr.message,
-              details: `Erro no banco '${databaseId}': ${dbErr.message}. Erro no banco '(default)': ${retryErr.message}`,
-              help: "URGENTE: Como você mudou de projeto no Firebase, você PRECISA atualizar o JSON da 'FIREBASE_SERVICE_ACCOUNT' na Vercel para o novo projeto. O erro indica que as credenciais atuais não têm acesso a este projeto.",
+              details: `ERRO CRÍTICO: Não conseguimos ler a coleção 'whitelists' em nenhum banco de dados. Erro no banco '${databaseId}': ${dbErr.message}. Erro no banco '(default)': ${retryErr.message}`,
+              help: "1. Verifique se o Firestore está ATIVADO no Console Firebase (Modo Produção ou Teste). 2. Verifique se a coleção 'whitelists' existe. 3. Verifique se a Service Account tem permissão de 'Editor de Cloud Datastore'.",
+              diagnostics: {
+                hasServiceAccount: !!process.env.FIREBASE_SERVICE_ACCOUNT,
+                serviceAccountProject: getApps()[0]?.options.projectId || "unknown",
+                configProject: process.env.VITE_FIREBASE_PROJECT_ID || "unknown",
+                databaseId: databaseId || "(default)",
+                initError: (global as any).firebaseInitError || "Nenhum erro de inicialização registrado",
+                isVercel: !!process.env.VERCEL
+              },
               debug: { 
                 databaseId, 
                 adminProjectId: getApps()[0]?.options.projectId || "unknown",
-                configProjectId: process.env.VITE_FIREBASE_PROJECT_ID || "unknown",
-                initError: (global as any).firebaseInitError
+                configProjectId: process.env.VITE_FIREBASE_PROJECT_ID || "unknown"
               }
             });
           }

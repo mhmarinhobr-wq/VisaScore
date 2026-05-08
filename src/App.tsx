@@ -748,21 +748,26 @@ function LoginView({ onLogin }: { onLogin: () => void }) {
         body: JSON.stringify({ email: email.toLowerCase().trim() }),
       });
 
-      const data = await response.json().catch(() => ({}));
-
       if (!response.ok) {
-        let msg = data.error || `Erro ao verificar acesso (Status: ${response.status}).`;
-        if (data.message) {
-          msg = `${msg} Mensagem: ${data.message}`;
+        const text = await response.text();
+        let msg = `Erro ao verificar acesso (Status: ${response.status})`;
+        
+        try {
+          const data = JSON.parse(text);
+          if (data.error) msg = data.error;
+          if (data.details) msg = `${msg}\n\nDetalhes: ${data.details}`;
+          if (data.help) msg = `${msg}\n\nAjuda: ${data.help}`;
+          if (data.message) msg = `${msg}\n\nMensagem: ${data.message}`;
+          if (data.diagnostics) msg = `${msg}\n\nDiagnóstico: ${JSON.stringify(data.diagnostics)}`;
+        } catch (e) {
+          // Se não for JSON, mostra o começo do texto da resposta
+          msg = `${msg}\n\nO servidor retornou uma resposta inválida: ${text.substring(0, 200)}...`;
         }
-        if (data.details) {
-          msg = `${msg} Detalhes: ${data.details}`;
-        }
-        if (data.debug) {
-            msg = `${msg} [DEBUG: ${JSON.stringify(data.debug)}]`;
-        }
+        
         throw new Error(msg);
       }
+
+      const data = JSON.parse(await response.clone().text());
 
       if (!data.whitelisted) {
         throw new Error(data.error || 'Nenhuma compra encontrada para este e-mail.');

@@ -1,10 +1,10 @@
 import express from "express";
-import path from "path";
-import { fileURLToPath } from "url";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
-import fs from "fs";
+import * as fs from "node:fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -556,7 +556,8 @@ async function createServer() {
     if (!isProd || !distExists) {
       console.log(isProd ? "Production mode but dist missing, falling back to Vite middleware..." : "Adding Vite middleware (Development)...");
       try {
-        const { createServer: createViteServer } = await import("vite");
+        const viteModuleName = "vite";
+        const { createServer: createViteServer } = await import(viteModuleName);
         const vite = await createViteServer({
           server: { 
             middlewareMode: true,

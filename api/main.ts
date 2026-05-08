@@ -1,30 +1,24 @@
-import createServer from '../server.ts';
-import fs from 'fs';
-import path from 'path';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 let cachedApp: any;
 
 export default async function handler(req: any, res: any) {
   console.log(`[Vercel] Received ${req.method} request for: ${req.url}`);
   
-  // Debugging filesystem on Vercel
-  try {
-    const rootDir = process.cwd();
-    console.log(`[Vercel] Current working directory: ${rootDir}`);
-    console.log(`[Vercel] Files in root: ${fs.readdirSync(rootDir).join(', ')}`);
-    const apiDir = path.join(rootDir, 'api');
-    if (fs.existsSync(apiDir)) {
-      console.log(`[Vercel] Files in /api: ${fs.readdirSync(apiDir).join(', ')}`);
-    }
-  } catch (debugErr) {
-    console.log(`[Vercel] Debug filesystem failed: ${debugErr}`);
-  }
-
   try {
     if (!cachedApp) {
       console.log("[Vercel] Initializing Express server instance...");
-      cachedApp = await createServer();
-      console.log("[Vercel] Express server initialized successfully.");
+      // Using try-catch with dynamic import to identify which module fails
+      try {
+        const serverModule = await import('../server.js');
+        const createServer = serverModule.default;
+        cachedApp = await createServer();
+        console.log("[Vercel] Express server initialized successfully.");
+      } catch (importErr: any) {
+        console.error("[Vercel] MODULE IMPORT FAILED:", importErr.code, importErr.message);
+        throw importErr;
+      }
     }
     
     return cachedApp(req, res);
